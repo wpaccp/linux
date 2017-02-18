@@ -1,0 +1,427 @@
+                                       Memcached服务应用指南
+     本章主要介绍Memcache内存缓存软件的原理和生产使用经验
+     Memcached是一套数据缓存系统或软件
+     用于在动态系统中缓存数据库数据，减少数据库的访问压力，达到提升系统性能的目的
+     ;Memcached在企业应用场景中一般是用来作为数据库的cache服务使用，Memcached是通过预分配指定的内存空间来存取数据的，因此它比mysql这样的数据库直接操作磁盘要快很多，可以提供比直接读取数据库更好的性能；另外，Memcached也经常作为集群架构节点应用服务器之间session数据共享的存储，学习完本章后，相信读者能够对Memcached服务有一个全面的了解，使构建一套属于自己的分布式内存对象缓存系统变成很简单的事情
+   4.1 Memcached介绍
+   4.1.1 Memcached是什么
+       Memcached是一个开源的，高性能的，具有分布式内存对象的缓存系统。从名称上看Mem就是内存的意思，而Cache就是缓存的意思,它通过在事先规划好的内存空间中缓存数据库的数据，以达到数据可的高并发访问，从而达到提升数据库的访问性能，加速动态应用服务的能力
+
+       软件                   作用                     缓存的数据
+       memcached，redis       后端数据库的缓存         动态的数据,例如：博文，BBS帖子
+       Squid,nginx,varnish    前端WEB应用的缓存        静态的数据，例如：图片，附件，
+                                                       js,css,html等
+
+       Memcached最初由LiveJournal的Brad Fitzpatrick在2003年开发完成，Memcached是整个项目的名称，而Memcached是服务器端的主程序名，Memcached服务一般都被用来保存网址中经常被读取的对象或数据，就像我们的客户端浏览器也会把经常访问的网页缓存起来一样，通过内存缓存来存取对象或数据要比磁盘存取块很多，因为磁盘是机械的介质，因此，在当今的IT企业中，memcached的应用范围很广
+  4.1.2 Memcached服务在企业架构集群中的应用的位置
+        Memcached服务在企业架构集群中的应用的位置.jpeg
+  4.1.3 Memcached服务在企业集群架构中应用的角色
+        (1)作为数据库的前端缓存应用
+        作用：减少数据库压力
+        这个是比较重要的，所有的网站动态数据都是保存在数据库当中，每次频繁的存取数据库，会导致数据库性能急剧下降，无法同时服务更多的用户，比如MYSQL特别频繁的锁表
+        ，那么，就可以让Memcached来分担数据库的压力。增加memcached服务的好处除了可以分担数据库的压力，增加memcached架构也无需改动整个网站架构，只需要修改程序让程序让程序首先来读取Cache查询数据就好了，当然别忘了，更新数据时也要更新缓存。
+        (2)session会话共享的共享存储
+  4.1.4 Memcached服务在应用中的工作流程
+        Memcached是一种内存缓存，在工作中经常用来缓存数据库中的数据，数据被缓存在事先预分配的memcached管理的内存，可以通过API的方式存取内存中缓存的这些数据，Memcached服务内存中缓存的数据就像一张巨大的HASH表，每条数据都是以key-value对的形式存在。
+        Memcached通过缓存经常被读取的数据库中的数据，当程序需要访问后端数据库获取数据时会优先访问Memcached内存缓存，如果换成中有数据就直接返回前端服务应用，如果没有数据(没有命中)在转发给后端的数据库服务器，程序服务收到Memcached内存缓存中没有的对应的数据后，除了返回给用户数据外，还会吧数据在内存中进行缓存，等待下次呗访问，从而大大的减轻数据库的压力，提高整个网站架构的响应速度，提升了用户体验。
+        当程序更新，删除数据库中已有的数据时，会同时发送请求通知Memcached已经缓存过的
+        同一ID内容的旧数据失效，从而保证Memcached中的数据和数据库中的数据一致
+        如果是在高并发场合，除了通知Memcached过期的缓存失效下，还会通过相关机制，使的在用户访问新数据前，通过程序预先把更新过的数据推送到memcached中缓存起来，这样可以减少数据库的访问压力，提升memcached中缓存的命中率。
+        图3-1 展示Memcached缓存系统和后端数据库系统的协作流程。
+        Memcached缓存系统和后端数据库系统的协作流程图.jpeg
+        上图利用Memcached来减少数据库压力的具体工作流程描述如下：
+        1)程序首先检查前端应用服务请求的数据是否在Memcached缓存中存在，如果存在，直接把请求的数据返回，不再请求后端数据库。
+        2)如果请求的数据不在Memcached缓存中，请求将被转发去查询数据库服务，把从数据库中取到的数据返回前端，同时把新取到的数据新缓存一份到Memcached缓存中。
+        3)当程序更新，删除数据库已有数家的同时，也会更新Memcached中的旧数据，从而保证
+        Memcache中缓存的数据和数据库中的数据一致，这个一致性非常重要。
+        4)当分配给Memcached内存空间用完之后，Memcached自身会使用LRU(Least Recently Used,最近最少使用)加到期失效策略。失效的数据首先被替换掉，然后是最近未使用的数据被替换掉。
+   4.1.5 Memcached服务在大型站点中的应用
+         几乎所有的网站，当访问量很大时，在整个网站架构集群中最先出现瓶颈的就是数据库角色的服务器以及存储角色的服务器，在工作中我们是尽量把用户的请求往前推，即当用户请求数据时，越是在靠近用户端的一端把数据返回就越好。
+         见作者的千万级PV/IP规模高性能高并发网站架构
+         http://oldboy.blog.51cto.com/2561410/736710
+         那么，为了缓解数据库的高并发访问压力，我们可以在数据库层配置数据读写分离及读数据库做负载均衡，但是更有效更简单的策略是，部署Memcached作为一个缓存区域，把部分数据库的信息保存在内存中，这样前端的服务能够迅速的读取到原本在数据库中才能读取到数据，那么，最重要的就是如何通过memcached服务分担数据库系统的压力，由于单台Memcached的内容容量的有限的，并且单台也是单点，因此，memcached也有负载均衡及分布式应用的场景
+         [分布式应用1]
+         Memcached支持分布式，我们在应用服务器上稍加改造，就可以更好的支持。例如：我们可以更加key适当进行有规律的封装，比如以用户为主的网站来说，每个用户都有USERID,那么可以按照固定的ID来进行提取和存取，比如1开头的用户保存在第一台Memcached服务器上，以2开头的用户的数据保存在第二台Memcached服务器上，存取数据都下按照
+         USERID来进行相应的转换和存取。
+         [分布式应用2]
+         在应用服务器上通过程序及URL_HASH,抑制性哈希算法去访问Memcached服务,所有Memcached服务器的地址池可以简单的配在每个程序文件里。
+         [分布式应用3]
+          门户如百度，会通过一个中间件代理负载请求后端的Cache服务
+         [分布式应用4]
+         可以用常见的LVS,haproxy做Cache的负载均衡，和普通的WEB应用服务相比，这里的重点是轮询算法，一般会选择url_hash，及一致性哈希算法。
+    4.1.6 Memcached服务应用优化案例
+          案例：某公司案例：
+          数据库负载很高,load值 20-30
+          使用uptime查看
+          uptime
+          登陆数据库查看:show processlist;show full processlist;
+          mysql -uroot -p'1111' -e "show full processlist"|grep -vi sleep
+          说明：数据库像LIKE'%XXX%'这样的语句特别多，导致数据库负载很高，LIKE'%XXX%'
+          这样的语句对于MYSQL数据库没有太大优化余地，我打开网站首页看了一下，应该是首页的搜索框搜索带来的结果。
+          优化方案思路:
+          1)从业务上实现用户登录后再搜索，这样可以减少搜索次数，从而减轻数据库服务的压力，或查看爬虫IP封掉之
+          2)配置多个主从同步，程序实现读写分离(最好让LIKE'%XXX%'这样的查询语句去从库查)，减少主库读写压力，
+          3)LIKE'%XXX%'这样的查询语句，一般在mysql数据库里很难优化，可以通过搜索服务Sphinx实现搜索
+          4)当然还可以利用c,ruby开发程序，实现每日读取计算搜索索引，保存在服务器上提供搜索，然后，每5分钟做一次，这是大公司针对站内搜索采取的比较好的方案
+          短期来看，我们更倾向于1,2的方案，简单，可实施，3,4是后期要发展的目标
+          5)如果有大量频繁的搜索，一般是有爬虫在爬你的网站，(单个IP地址的PV值，如果过大就说明有爬虫在爬站)，分析WEB IP，并封掉
+          6)在数据库前端加上memcached缓存服务器，
+     4.1.7 memcahced的特性
+          Memcached作为高并发，高性能的缓存服务，具有如下特征：
+          1)协议简单
+          Memcached的协议实现比较简单，实用的是基于文本行的协议，能够通过telnet直接操作Memcached服务存取数据
+          2)基于libevent的事件处理
+          简单的说，libevent是一套利用C开发的程序库，它将BSD系统的kqueue,Linux系统的
+          epoll等处理功能封装成一个接口，确保即使服务器端的连接数增加也能发挥很好的性能。
+          Memcached就是利用这个库进行异步事件处理，关于这个库的更详细内容，有兴趣的读者可以查看相关文档。
+          3)内置的内存管理方式
+          Memcached有一套自己管理内存的方式，这套管理方式非常有效。所有的数据都保存在Memcached内置的内存中，当存入的数据占满内存空间时，Memcached使用的LRU算法自动删除不使用的缓存数据，即重用过期数据的内存空间。Memcached是为缓存系统设计的，因此，没有考虑数据的容灾问题，和机器的内存一样，重启机器数据将会丢失，如果希望服务重启数据依然能保留，那么就需要sina网开发的memcachedb持久性内存缓存系统，当然还有常见的NOSQL服务如redis，内存缓存：memcached*,memcachedb,TokyoTyrant*MongoDB,Cassandra*,redis*,tair,CouchDB.
+          更多开源软件见http://oldboy.blog.51cto.com/2561410/775056
+          3)互不通信的Memcached之间具有分布特征
+          各个Memcached服务器之间互相不通信，都是独立的存取数据，不共享任何信息。通过对客户端的设计，让Memcached具有分布式，能支持还来缓存和大规模应用。
+     4.1.8 Memcached软件工作原理
+           Memcached是一套C/S模式架构的软件，在服务器端启动服务守护进程，可以为memcached服务器指定监听的IP地址，端口号，并发访问连接数以及分配多少内存来处理客户端的请求的参数。
+           Memcached软件是由C语言来实现的，全部代码仅2000多行，采用的是异步I/O，其实现方式是基于事件的单进程和单线程的。使用libevent作为事件通知机制，多个服务器可以协同工作，但这些服务器端之间是美哟任何通信联系，每个服务器端只对自己的数据进行管理，应用程序端通过制定缓存服务器的IP地址和端口，就可以连接memcached服务互相通信。
+           需要被缓存的数据以key/value对的形式保存在服务器端预分配的内存区中，每个被缓存的数据都有唯一的标识key,操作Memcached中的数据通过这个唯一标识的key进行。缓存到Memcache中的数据仅放置在Memcached服务预分配的内存中，而非存储在memcached所在的磁盘上，因此存取速度非常快。
+           由于Memcached服务自身没有对缓存的数据进行持久化存储的设计，因此，在服务器
+           端的memcached服务进程重启之后，存储在内存中的这些数据就会丢失。且当内存中缓存的数据容量达到启动时设定的内存值时，就自动使用LRU算法删除过期的缓存数据。
+           Memcached软件开发早，当初仅为缓存而设计的，因此在设计之初并没有过多考虑数据的永久性问题，因此，入股使用memcached作为缓存数据服务，要考虑数据丢失后带来的问题，例如，是否可以重新生成数据，还有，在并发场合数据丢失会不会导致网站架构雪崩(不就抢百度的架构师就讲解过类似的问题)
+           为了满足数据可以持久性的保留的需求，sina网基于memcached服务开发了一款NOSQL软件，名字Memcachedb，可以实现在缓存的基础上增加了持久化缓存的特性。
+           Memcached支持各种语言编写的客户端API，包括shell,PHP,Python,Java,和C等。
+     4.1.9 Memcached 内存管理机制
+           Memcached利用Slad Allocation 机制来分配和管理内存，传统的内存管理方式是：
+           使用完通过malloc分配的内存后通过free来回收内存。这种方式容易产生内存碎片并降低操作系统对内存的管理效率。Slab Allocation 机制不存在这样的问题，它按照预先规定的大小，将分配的内存分隔为特定长度的内存块，再把尺寸相同的内存块分成组，这些内存不会释放，可以重复利用。
+           Memcached服务器端保存着一个空闲的内存块列表，当有数据存入时根据接受到的数据大小，分配一个能存下这个数据的最小的内存块。这种方式有时候会造成内存浪费。例如：将200字节的一个数据存入200字节的一个内存块中，会有100字节被浪费掉，不能被使用，避免浪费内存的办法是，预先计算出应用存入的数据大小，或吧同一业务类型的数据存入一个memcached服务器中，确保存入的数据大小相对均匀，这样就可以减少内存的浪费了。
+           还有一种方式，在启动时指定"-f"参数，能在某种程度上控制内存组之间的大小差异。在应用中使用memcached时，
+           通常可以不重新设置这个参数，使用默认值1.25进行部署。如果想优化memcached对内存的使用，可以考虑重新计算数据的预期平均长度，调整这个参数来获得合适的设置值。
+     4.1.10 Memcached 的删除机制
+            前面已经介绍过，Memcached不会释放已经分配的内存空间(除非添加数据设定过期或内存缓存满了)，在数据过期后，客户端不能通过key取出它的值，其存储空间被重新利用。
+            Memcached使用的是一种Lazy Expiration策略，自己不会监控存入的key/value对，是否过期，而是在获取key值时查看记录的时间戳(sed key flag exptime bytes)，检查key/value对空间是否过期，
+            这种策略不会在过期检测上浪费CPU资源。
+            memcached在分配空间时，优先使用已经过期的key/value对空间，当分配的内存空间占满时，Memcached就会使用LRU算法来分配空间，删除最近最少使用key/value对，
+            将其空间分配给新的key/value对。在某些情况下，如果不想使用LRU算法，那么可以通过"-M"参数来启动memcached,这样，Memcached在内存耗尽时，会返回一个报错信息。
+     4.2    Memcached服务安装
+            Memcached的安装比较简单，很多平台支持Memcached，常见的有:
+            Linux,FreeBSD,Solaris,Windows.我们以centos6.4为例
+            软件地址：
+            Memcached下载地址：http://www.danga.com/memcached/
+            libevent 下载地址：http://monkey.org/~provos/libevent/
+     4.2.1 安装Memcached
+     4.2.1.1 安装libevent(适合C5.8和C6.4)
+            下载Memcached前需要先安装libevent，有关libevent我们在前文已经介绍，首先用wget下载libevent:
+            (1)操作命令
+            cat /etc/redhat-release
+            uname -rm
+            mkdir /home/oldboy/tools
+            cd /home/oldboy/tools/
+            wget http://www.monkey.org/~provos/libevent-1.4.13-stable.tar.gz
+            ls libevent-1.4.13-stable.tar.gz
+            tar zxf libevent-1.4.13-stable.tar.gz
+            cd libevent-1.4.13-stable
+            ./configure
+            make
+            make install
+            centos系统也可以使用yum直接安装libevent
+     4.2.1.2 安装 Memcached
+             (1)操作命令
+             wget http://memcached.googlecode.com/files/memcached-1.4.13.tar.gz
+             tar zxf memcached-1.4.13.tar.gz
+             cd memcached-1.4.13
+             ./configure
+             make
+             make install
+             cd ../
+             其他下载地址：
+             http://memcached.googlecode.com/files/memcached-1.4.15.tar.gz
+             http://code.google.com/p/memcached/downloads/list
+             memcached-2.2.5.taz <====memcached客户端软件
+             memcached-1.4.13.tar.gz <====memcached服务端软件
+     4.2.1   启动 Memcached
+             (1)配置ld.so.conf路径防止启动memcached时报错
+              echo "/usr/local/lib" >> /etc/ld.so.conf
+              ldconfig
+              提示:Centos 5.8不做上面的配置也可以
+             (2)开始启动memcached
+              which memcached
+              memcached -m 1m -p 11212 -d -c 8192
+              memcached -m 16m -p 11212 -d -u root -c 8192
+              lsof -i tcp:11211
+              ps -ef|grep memcached|grep -v grep
+              memcached相关启动参数说明：
+              -p 指定memcached服务监听TCP端口号。默认11211
+              -m 指定memcached服务可以缓存数据的最大内存。默认64M
+              -u 运行Memcached的用户
+              -d 作为守护进程在后台运行
+              -c 最大的并发连接数，默认是1024，按照服务器的并发访问量来设定
+              -vv 以very vrebose模式启动，调试信息和错误输出到控制台
+              -P 设置保存Memcached的pid文件
+              -l 指定监听的服务器IP地址
+              其他选项，通过"memcached -h"命令可以显示所有可用选项，读者可自行阅读相关资料
+              (3)检查启动结果
+              netstat -lnt | grep 11211
+              ps -ef | grep memcache | grep -v grep
+              启动多个实例
+              memcached -m 1m -p 11212 -d -c 8192
+              memcached -m 1m -p 11212 -d -u root -c 8192
+              ps -ef | grep memcached | grep -v grep
+              提示：把上述启动命令放入/etc/rc.local
+              (4)写入数据检查结果
+              向memcached中添加数据
+               a.通过nc写入
+               printf "set key008 0 0 10\r\noldboy0987\r\n"|nc 127.0.0.1 11211
+               printf "set key007 0 0 10\r\noldboy\r\n"|nc 127.0.0.1 11211
+               printf "get key007\r\n"|nc 127.0.0.1 11211
+               printf "get key008\r\n"|nc 127.0.0.1 11211
+               printf "del key008\r\n"|nc 127.0.0.1 11211
+               printf "delete key008\r\n"|nc 127.0.0.1 11211
+               推荐上述测试操作memcached
+               b.通过telnet写入
+               telnet localhost 11211
+               set key007 0 0 10
+               oldboy
+               get key007 
+               stats #显示memcached的状态
+               STAT get_hits 2  <====命中数据
+               STAT get_misses 2 <===丢失数量
+               关闭memcached,测试数据是否丢失
+               pkill memcached
+               ps -ef | grep memcached
+               memcached -m 16m -p 11211 -d -u root -c 8192
+               telnet localhost 11211
+               操作memcached命令的语法：
+               <command name> <key> <flags> <exptime> <bytes>\r\n
+           例如：set           key    0        0         10  \r\n
+               - <commamd name>是 set,add 或者 repalce
+               set 意思是 "存储此数据信息"
+               add 意思是 "存储此数据信息，只在服务器某位置保存此键值的数据时"
+               replace 意思是"存储此数据，只在服务器*曾*保留此键值的数据时"
+               - <key> 是接下来的客户端所要求存储的数据的键值
+               - <flags> 是取回内容时，与数据和发送块一同保存服务器的任意16位无符号
+               整形(用十进制来书写)。客户端可以用它作为"位域"来存储一些特定的信息；
+               它对服务器是不透明的。
+               - <exptime>是终止时间。如果为0。该项永不过期(虽然它可能被删除，以便为其他缓存项目腾出位置)。如果非0(Unix时间戳或当前时刻的秒偏移)，到达终止时间后，客户端无法再获得这项内容。
+               - <bytes>是随后的数据区块的字节长度，不包括用于分野"\r\n".他可以是0
+               (这时后面跟随一个空的数据区块)
+               在这一行以后，客户端发送数据区块
+               - <data block>是大段的8位数据，其长度由前面的命令行中的<bytes>指定
+               发送命令行和数据区块以后，客户端等待回复，可能的回复如下：
+               - "STORED\r\n"
+               表明成功
+               - "NOT_STORED\r\n"
+               表明数据没有被存储，但不是因为发生错误，这通常意味着add或replace命令
+               的条件不成立，或者，项目已经位列删除队列(参考后文的"delete"命令).
+        4.4.2 关闭memcached
+              pkill memcached
+              netstat -lnt | grep 112
+              更好的关闭多实例的memcached
+              memcached -m 16m -p 11211 -d -u root -c 8192 -P /var/run/1121.pid
+              memcached -m 1m -p 11212 -d -u root -c 8192 -P /var/run/11212.pid
+              memcached -m 1m -p 11213 -d -u root -c 8192 -P /var/run/11213.pid
+              ps -ef | grep memcached | grep -v grep
+              ls -l /var/run/11*
+              kill `cat /var/run/11211.pid`
+              ps -ef | grep memcached | grep -v grep
+              kill `cat /var/run/11212.pid`
+              工作中如何配置memcached?
+              一般都是开发人员提出需求，说要部署一个memcached，作为数据缓存
+              我们运维接到了需求，内存指定多大是根据业务有多少数据要缓存来确定，还要确定业务重要性，进而采取负载均衡，分布式等架构，最后确定并发连接数
+              实际的部署，一般就是安装memcached服务端，并确保能够连接上。
+      4.2.3 安装memcached客户端
+            以下安装LNMP的环境，要求页面能出来phpinfo，才能继续操作。
+            图1.jpeg
+            php的memcached模块(memcached客户端)编译安装
+            本文以PHP程序为例，讲解安装Memcache的PHP的客户端及memcache的扩展在
+            http://pecl.php.net/packet/memcached 选择想要下载的Memcached版本。这里以
+            memcached-2.2.5版本为例来安装PHP的Memcached扩展：
+            1：解压缩并编译安装
+            cd /home/oldboy/tools
+            wget http://pecl.php.net/get/memcache-2.2.5.tgz
+            tar zvxf memcache-2.2.5.tgz
+            cd memcache-2.2.5
+            /application/php/bin/phpize
+            ./configure --enable-memcache --with-php-config=/application/php/bin/php-config --with-zlib-dir
+            make
+            make install
+            安装完后会有类似这样的提示：
+            /application/php5.3.10/lib/php/extensions/no-debug-non-zts-20090626/
+            ll /application/php5.3.10/lib/php/extensions/no-debug-non-zts-20090626/
+            2:修改php.ini文件
+            将 extension_dir = "./"修改为 extension_dir = "/application/php5.2.6/lib/php/extensions/no-debug-zts-20060613"
+            并添加一行
+            extension=memcache.so
+            3:重启apache服务使PHP的配置生效
+            /application/apache/bin/apachectl -t
+            /application/apache/bin/apachectl graceful
+            如果是nginx则：
+            /application/nginx/sbin/nginx -t
+            /application/nginx/sbin/nginx -s reload
+            pkill php-fpm
+            /application/php/sbin/php-fpm
+            4)打开浏览器访问phpinfo页面，出现如下内容表示memcache客户端安装成功
+             图2.jpg
+            5)编写测试PHP脚本
+            自己写一个PHP程序测试一下吧
+            vim op_mem.php
+            <?php
+                $memcache01 = new Memcache; //创建一个memcache对象
+                $memcache02 = new Memcache; //创建一个memcache对象
+                $memcache01->connect('10.0.0.19',11211) or die ("Could not connect");
+                $memcache02->connect('10.0.0.19',11212) or die ("Could not connect");
+                #连接Memcache服务器
+                $memcache01->set('key001','oldboy001'); #设置一个变量到内存中，名称是key
+                001值是oldboy001
+                $memcache02->set('key002','oldboy002'); #设置一个变量到内存中，名称是key002值是oldboy002
+                $get_value01 = $memcache01->get('key001'); #从内存中取出key001的值
+                $get_value02 = $memcache02->get('key002'); #从内存中取出key002的值
+                echo $get_value02."<br>";
+                echo $get_value01;
+            ?>
+     4.3 Memcached应用
+     4.3.1 数据库前端的内存缓存
+
+     4.3.2 集群中的session共享存储
+     可参照
+     httop://oldboy.blog.51cto.con.2561410/1323468
+     4.3.3如何实现集群中的session共享存储实战
+     http://oldboy.blog.51cto.com/2561410/1331316
+     cd /application/php/lib/
+     vim php.ini
+     启用session.save_path = "/tmp"功能选项，
+     保存重启php-fpm
+     /application/php/sbin/php-fpm
+     ps -ef | grep memcached
+     vim php.ini
+     1)将#session.save_handler = file 修改成 session.save_handler = memcache
+     2)将#session.save_path = "/tmp" 修改成 session.save_path = "tcp://10.0.0.19:11211"
+     修改完成后，保存退出
+     pkill php-fpm
+     /application/php/sbin/php-fpm
+ 4.4 Memcached分布式集群
+     前面已经介绍过，Memcached的分布式是通过客户端的程序库来实现的，下面举例。
+     描述其工作过程
+     假设有node1,node2.node3三台Memcached服务器，应用程序要实现保存名为tokyo,tokyo1,tokyo2,tokyo3的数据
+     如图所示：
+     分布式图1.jpg
+
+ 4.5 Memcached的管理
+ 4.5.1 通过端口管理Memcached
+      通过在命令行执行telnet ip port方式可以登录到Memcached的监听端口，然后执行一些命令，
+      1)telnet ip port 方式管理。
+      略
+      2)命令直接操作，nc这样的命令
+      如果写脚本通过nc检查端口并监控memcache服务可以用下面的方法：
+      a.memcahced监控脚本：
+      export oldboyTimestampMemcachedIp=$1
+      export oldboyTimestampMemcachedPort=$2
+      export oldboyTitle=NAGIOS
+      export oldboyTimestampMD5=4EDO6F8D41B9264OLDOBOY30BE5212BB7E34
+      export wwwServerIp=$3
+      export wwwServerPort=$4
+      printf "delete $oldboyTimestampMD5\r\n" | nc $oldboyTimestampMemcachedIp $oldboyTimeStampMemcachedPort >/dev/null 2>&1
+      sleep 1
+      judge=($(printf "HEAD /oldboyTitle HTTP/1.1\r\nHost: $5\r\n\r\n" | nc $wwwServerIp $wwwServerPort | head -n1|tr "\r"\n"))
+      b：通过nc查看memcached状态
+      printf "stats\r\n"|nc 127.0.0.1 11211
+      通过这些命令的输入来查看 Memcached的运行状态
+      目前管理 Memcached的命令有:
+      a.stats,统计Memcached的各种信息
+      b.stats reset,重新统计数据，重新开始统计
+      c.stats slabs,显示slabs信息。通过这个命令能获取每个slabs的chunksize长度，从而确定数据到底保存在哪个slab
+      stats items, 显示slab中的item数目
+      stats setting 可以查看一些memcached 设置 例如 线程数...
+      stats slabs   查看slabs相关情况
+      stats items   查看items相关情况
+      stats sizes   查看存在的item个数和大小
+      stats cachedump 查看key value
+      stats reset   清理统计数据
+      set|get,gets 前面已经介绍过，用来保存或获取数据
+      例如，要查看Memcached的统计信息，执行"telnet ip 监听端口" 命令，登陆成功之后执行stats命令，具体过程如下：
+      telnet 10.0.0.17 11211
+      通过以上信息可以看到，Memcached状态，连接的次数，当前的并发连接数；通过这些信息可以分析出，当前Memcached的换入换出是否比较厉害，容量是否足够，通过memadmin
+      php 工具管理:memadmin-1.0.12.tar.gz
+      memadmin-1.0.12.tar.gz的安装过程
+      cd /application/nginx-1.4.3/blog/
+      rz -y 
+      tar zxf memadmin-1.0.12.tar.gz
+      ll memadmin
+      在客户端浏览器中输入http://blog.etiantian.org/memadmin/
+      用户名和密码都是admin
+  4.5.2 通过memcached-tool管理 Memcached
+      memcached-tool是Brad Fitzpatrick 利用Perl编写的一个Memcached管理脚本
+      这个脚本通过将之前的命令行进行封装，使输入的值更加规整，进而更便于分析查看
+      可以通过下面的地址下载memcached-tool
+      http://code.sixapart.com/svn/memcached/server/scripts/memcached-tool
+      下面是memcached-tool的基本用法
+      perl memcached-tool
+      memcached-tool的执行实例如下：
+      perl memcached-tool 127.0.0.1:11211
+      perl memcached-tool 127.0.0.1:11211 display
+      以上过程格式化输出的stats命令的信息非常规整，如图3-7所示
+      图3-7格式化输出的stats命令的信息
+      总的来说，对单个或少量的memcached服务器器的维护相对容易，如果memcached量非常的大，这里说的量是指由单个memcached运行100GB的数据容量或者有多台大容量的memcached运行服务时，如何组织这些资源，以及在某一个memcached服务器宕机时，能保证后端的数据库压力不会产生瓶颈，这是需要考虑的问题，在进行大规模部署时，需要根据业务分配不同的memcached服务，同一类型的业务使用相同的资源；并且记录这些业务使用的端口资源，定期分析这些资源是否足够；以及利用一致性哈希算法来确保在扩容memcached的情况下，尽量较少对数据库的容量。
+   4.6 Memcached的监控
+     部署好memcahced之后，需要对memcached的使用情况进行跟踪；监控memcached的状态信息，内存使用情况，hit/miss值是多少，通过对Memcached的监控不仅能立刻了解Memcached出现问题，还能够利用状态信息来分析业务数据的增长并未未来的容量规划提供依据。
+     监控memcached的工具很多，当前的常用监控工具有：memcache.php,Nagios和cacti,
+     下面分别对这三种监控方法进行介绍
+  4.6.2 利用memcache.php对单台Memcached进行监控
+     利用memcache.php进行监控是最简单的监控方法，只要机器上支持PHP环境即可。这种监控的执行过程是；
+     把这个文件放到可以访问的目录中，然后对这个memcache.php文件进行修改，下载此文件的地址如下：
+     http://livebookmark.net/memcachephp/memcachephp.zip
+     vim memcache.php...
+     define('ADMIN_USERNAME','memcache');#定义用户名
+     define('ADMIN_PASSWORD','password');#定义密码
+     $MEMCACHE_SERVERS[] = 'mymemcache-server:11211';#定义要查看的IP和端口
+     $MEMCACHE_SERVERS[] = 'mymemcache-server2:11212';#可添加多个
+     修改自己定义的用户名和密码之后，就可以通过URL访问这个PHP文件。输入用户名和密码后Memcached的状态图如图3-8所示
+     图3-8利用memcache.php监控Memcached的状态图
+     图3-8很直观地表示出了当前Memcached的使用情况，命中和不命中的比例等各种状态都非常直观。
+  4.6.3 通过nagios监控Memcached
+  4.6.4 通过cacti监控Memcached
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
