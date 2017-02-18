@@ -1,0 +1,755 @@
+                                     Rsync数据同步工具应用指南
+    回顾：常见的同步工具和方法(scp,NFS,SFTP,http,samba,rsync,drbd等)
+    1.1 Rsync介绍
+    1.1.1 什么是Rsync
+          Rsync是一款开源的，快速的，多功能的，可实现全量及增量的本地或远程数据同步备份工具，Rsync软件适合于uninx/linux/windows等多种操作系统平台。
+          下面是官方的英文简单描述：rsync-a fast,versatile,remove(and local)file-copying too
+          来自：http://www.samba.org/ftp/rsync/rsync.html
+    1.1.2 Rsync简介
+          Rsync英文全称为Remote Rvnchronization,从软件的名称就可以看出来，Rsync具有可使本地和远程两台主机之间的数据快速复制同步镜像，远程备份的功能，这个功能类似于ssh带的SCP命令，但又优于SCP命令的功能，SCP每次都是全量拷贝，而rsync可以增量拷贝，当然，Rsync还可以在本地主机的不同分区或目录之间全量及增量的复制数据，这又类似于CP命令，但同样也优于CP命令，CP每次都是全量拷贝，而rsync可以增量拷贝。
+          小提示，利用Rsync还可以实现删除文件和目录的功能，这又相当于rm命令！一个rsync
+          相当于scp,cp,rm,但是功能方面比它们还优秀
+          在同步备份数据时，默认情况下，Rsync通过其独特的"quick check"算法，它仅同步大小或者最后修改时间发生变化的文件或目录，当然也可根据权限，属主等属性的变化同步，但需要相应的参数，甚至可以实现只同步一个文件里有变化的内容部分，所以，可以实现快速的同步备份数据
+          提示：传统的scp,cp工具拷贝每次均为完整的拷贝，而rsync除了可以完整拷贝外，海具备增量拷贝的功能，因此，从同步数据的性能及效率上，Rsync工具更胜一筹。
+    1.1.3 Rsync的特性
+          Rsync的特性如下：
+          1)支持拷贝特殊文件如连接文件，设备等。
+          2)可以有排除指定文件或目录同步的功能，相当于打包命令ta可以做到保)r的排除功能
+          3)可以做到保持源文件或目录的权限，时间，软硬链接，属主，组等所有属性均不改变-p
+          4)可实现增量同步，既只同步发生变化的数据，因此数据传输效率很高，tar.
+          5)可以使用rcp,rsh,ssh等方式来配合传输文件(Rsync本身部队数据加密)
+          6)可以通过socket(进程方式)传输文件和数据
+          7)支持匿名的或认证(无需系统用户)的进程模式传输，可实现方便安全的进行数据备份或镜像
+    1.1.4 Rsync的企业工作场景说明
+    1.1.4.1 两台服务器之间数据同步
+            服务器之间数据同步逻辑图.jpg
+    1.1.4.2 把所有客户服务器数据同步到备份服务器
+            生产场景集群架构服务器备份方案简单描述(cron+sysnc)
+            1：针对公司重要数据备份混乱状况和领导提出备份全网数据的解决方案。
+            2：通过本地打包备份，然后rsync定时把全网数据统一备份到一个固定存储服务器，然后在存储服务器上通过脚本检查并报警管理员备份结果
+            3：定期将IDC机房的数据备份到公司内部不同服务器，防止机房地震或火灾问题导致数据丢失
+            生产场景集群架构服务器备份方案.jpg
+    1.1.4.3 rsync结合inotify的功能做实时的数据同步(rsync+intofy,rsync+sersync)
+            rsync结合inotify的功能做实时的数据同步架构图.jpg
+        2.1 Rsync的工作方式
+            为了方便读者学习，我们从实际的使用功能方面进行了以下划分，一般来说，Rsync大致使用三种主要的传输数据的方式。分布为
+            单个主机本地之间的数据传输(此时类似于CP命令的功能)
+            借助rcp,ssh等通道来传输数据(此时类似于SCP命令的功能)
+            以守护进程(socket)的方式传输数据(这个是rsync自身的重要的功能)
+            以上的几种rsync的工作方式，我们可以通过man rsync帮助或者查看官方的手册获得
+      2.2.1 本地数据传输模式(local-only mode)
+            Rsync 本地传输模式的语法为:
+            rsync [OPTION...] SRC .. [DEST]
+            语法说明：
+            1) Rsync 为同步的命令
+            2) [OPTION...]为同步时的参数选项
+            3) SRC为源，即带拷的分区，文件或目录
+            4) [DEST]为目的分区，文件或目录等；
+            直接本地同步就相当于CP命令
+            实例1：把系统的hosts文件同步到/opt目录
+            rsync /etc/host/ /opt/
+            cat /opt/hosts
+            实例2：把系统的hosts文件同步到/opt目录中并保持源文件的属性
+            rsync -avz /etc/hosts /opt/
+            实例3：删除/data目录
+            mkdir /null
+            rsync -r --delete /null/ /data/
+            提示：如果是/null，表示是null这个目录和这个目录中所有的文件和目录，
+            如果是/null/，就表示null这个目录里的所有目录和文件。不表示目录名
+            上述实例说明了null目录是空的，所以也将data目录所有的内容清空了。
+            data目录的操作参照了null目录里的内容，2：它也可以将null目录里的所有文件或其他元素同步到data目录里，前提条件是null目录里不能为空。要求执行该操作后，
+            两个目录里的元素要求相同
+       2.2  借助SSH通道从远端主机拉取数据例子的时间
+            拉取实例
+            rsync -avzp -e 'ssh -p 22' oldboy@10.0.0.141:/opt /tmp
+            关键语法说明
+            1)-avz相当于-vzrtopgDl,表示同步时文件和目录属性不变，参数细节见后文
+            2)-P显示同步的过程，可以用--progress替换
+            3)-e'ssh -p 22'，表示通过ssh的通道传输数据，-p 22可以省略
+            实例4：将/etc/host复制到10.0.0.8下的/home/oldgirl目录下
+            rsync -avz /etc/hosts -e 'ssh -p 52113' oldgirl@10.0.0.8:~
+            或者：
+            su - oldboy888
+            rsync -avz /etc/hosts -e 'ssh -p 52113' 10.0.0.8:~
+            实例5：将10.0.0.8下的hosts拉回到本地的tmp目录下
+            rsync -avz -e 'ssh -p 52113' 10.0.0.8:~/hosts /home/oldboy888/
+       2.3  Rsync命令同步参数选项
+            在讲解本节内容之前，我们先来了解下rsync命令的同步参数选项
+            -v,--verbose 详细模式输出，传输时的进度等信息
+            -z,--compress 传输时进行压缩以提供传输效率，--compress-level=NUM可按级别
+            压缩
+            -a,--archive 归档模式，表示以递归方式传输文件，并保持所有文件属性，等于
+            -rtopgDl
+            -r,--recursive 对子目录以递归模式，即目录下的所有目录都同样传输，注意是小写r
+            -t,--times 保持文件时间信息
+            -o,--owner 保持文件属主信息
+            -p,--perms 保持文件权限
+            -g,--group 保持稳健属组信息
+            -P,--progress 显示同步的过程及传输时的进度等信息
+            -D,--devices 保持设备文件信息
+            -l,--links 保留软链接
+            -e,--rsh=COMMAND 使用的信道协议，指定替代rsh的shell程序。例如：ssh --exclude=PATTERN 指定排除不需要传输的文件模式
+            --bwlimit=RATE  限速功能
+            保持同步目录及文件属性：
+            这里的-avzP相当于-vzrtopgDlP(还多了Dl功能)，生产环境常用的参数选项为-avzP
+            或-vzrtopgP如果时放入脚本中，也可以把-v和-P去掉。这里的--progress可以用
+            -P代替
+            特别说明：以上参数为生产环境中常用的参数，对于初学读者掌上面的内容已足够，刚开始学习要抓重点，相关的参数还有非常多，需要时可以自行man rsync或查看
+            参考资料地址。http://www.samba.org/ftp/rsync/rsync.html OPTION SUMMARY节
+            生产参数：-avz相当于vzrtopg
+            例6：rsync的限速功能
+            tar zcvf etc.tar.gz /etc
+            rsync -avz --bwlimit=100 'ssh -p 52113' etc.tar.gz oldgirl@10.0.0.8:~
+        2.4 以守护进程(socket)的方式传输数据(重点)
+      2.4.1 部署前的准备工作： 
+    2.4.1.1 部署环境
+            考虑到很多读者没有实际的生产环境，本文使用VMWARE虚拟机环境下Linux主机来进行实验。和生产环境的真实服务器部署几乎没任何区别
+            操作系统:
+            cat /etc/redhat-release
+            uname -r
+            主机网络参数设置：
+            主机名          网卡eth0             网卡eth1                 用途
+            rsync-server    192.168.100.107     10.0.0.107             rsync服务端
+            rsync-client01  192.168.100.108     10.0.0.108             rsync节点
+            rsync-client02  192.168.100.109     10.0.0.109             rsync节点
+            提示：如无特殊说明，子网掩码均为255.255.255.0
+     2.4.1.2 具体需求
+            要求在A-Server上以rsync守护进程的方式部署rsync服务，
+            使得所有rsync节点客户端主机，可以把本地数据通过rsync的方式备份到数据备份
+            服务器A-Server上，本例的客户端仅以B-Server,C-Server为例
+     2.4.1.3 备份拓扑
+             rsync守护进程方式备份数据解决方案图,jpg
+     2.4.2   开始部署rsync服务-Rsync服务端操作过程：
+     2.4.2.1 配置rsync(rsync服务器端:ip:10.0.0.107)
+             1)配置rsyncd.conf
+             首先确认软件是否按照
+             rpm -qa rsync
+             yum install rsync
+             vim /etc/rsyncd.conf #增加如下配置，/etc/rsyncd.conf为默认的rsync服务的
+             配置文件路径及文件名，特别注意，不要落下了d,是rsyncd.conf不是rsync.conf
+             #rsync_config_______________start
+             #created by oldboy 15:01 2007-6-5
+             #QQ 31333741 blog:http://oldboy.blog.51cto.com
+             ##rsyncd.conf start##
+             uid = rsync
+             gid = rsync
+             use chroot = no
+             max connections = 200
+             timeout = 300
+             pid file = /var/run/rsyncd.pid
+             lock file = /var/run/rsync.lock
+             log file = /var/log/rsyncd.log
+             [oldboy]
+             path = /oldboy/
+             ignore errors
+             read only = false
+             list = false
+             hosts allow = 10.0.0.0/24
+             hosts deny = 0.0.0.0/32
+             auth users = rsync_backup
+             secrets file = /etc/rsync.password
+             #rsync_config_______________end
+             2)以守护进程启动rsync
+             rsync --daemon
+             netstat -lntup | grep 873
+             ps -ef | grep rsync
+             cat /var/log/rsyncd.log
+             mkdir /oldboy -p
+             useradd rysnc -s /sbin/nologin
+             chown -R rsync.rsync /oldboy
+             echo "rsync_backup:oldboy" >/etc/rsync.password
+             #注意：其中rsync_backup:oldboy中的rsync_backup为同步传输用到的虚拟账号，
+             这个账号仅仅为rsync的账号，不需要是系统账号，后面的oldoby为密码，不超过8
+             位，账号和密码中间用冒号分隔
+             cat /etc/rsync.password
+             chmod 600 /etc/rsync.password
+             /etc/init.d/iptables stop
+             setenforce 0
+             echo "/usr/bin/rsync --daemon" >>/etc/rc.local
+             cat /etc/rc.local
+             2)rsync客户端配置(ip:10.0.0.108)
+             rpm -qa rsync
+             echo "oldboy" >/etc/rsync.password
+             chmod 600 /etc/rsync.password
+             cat /etc/rsync.password
+             3)rsync功能测试
+             mkdir /data1
+             #执行命令rsync -avz rsync_backup@10.0.0.107::oldboy /data1是需要密码的
+             rsync -avz rsync_backup@10.0.0.107::oldboy /data1 --password-file=/etc/rsync.password #免密码
+             拉回到本地
+             cd /oldboy/
+             touch {a..g}
+             rsync -avz rsync_backup@10.0.0.107::oldboy /data1 --password-file=/etc/rsync.password
+             或者：rsync -avz rsync://rsync_backup@10.0.0.107/oldboy /data1 --password-file=/etc/rsync.password
+             推动到远端主机
+             touch {1..10}
+             rsync -avz /data1/ rsync_backup@10.0.0.107::oldboy --password-file=/etc/rsync.password
+             或者：rsync -avz /data1 rsync://rsync_backup@10.0.0.107/oldboy --password-file=/etc/rsync.password
+             如果在执行上述命令时出现该故障现象
+             @ERROR: auth failed on module oldboy
+             rsync error: error starting client-server protocol (code 5) at main.c
+             (1503) [receiver=3.0.6]
+             故障原因：在rsyncd.conf定义的/etc/rsync.password与rsync命令定义的不匹配
+             比如将/etc/rsync.password敲错成/etc/rsyncd.password
+             排查过程
+             查看cat /etc/rsync.password是否存在，如果不存在该文件就说明配置文件中配置有错误
+             2）cat /var/log/rsyncd.log
+             如果出现以下故障
+             ...[4100] secrets file must not be other-accessible(see strict modes option)
+             ....
+             故障原因：/etc/rsync.password的权限不是600的权限，
+             文件的权限过大导致的错误
+             解决办法：
+             chmod 600 /etc/rsync.passrod
+             rsync学习小结1
+             rsync server:
+             1)部署配置文件<vim /etc/rsync.conf>(核心内容：用户rsync，目录，虚拟用户，密码文件)
+             2)创建共享目录<mkdir /oldboy>
+             3)创建rsync用户，并且授权访问/oldboy
+             4)创建密码文件，复制配置文件里的路径，然后添加密码内容
+             内容的格式：虚拟用户名:密码
+             5)设置密码文件权限为600
+             6)使用rsync --daemon 启动服务，如果成功后，最好放/etc/rc.local
+             7)如果启动出现错误，需要查看日志 tail /var/log/rsyncd.log
+
+             rsync client（多个）
+             1)密码文件，和服务器端的密码文件没有任何关系。
+             可以通过--password-file=/etc/rsync.password这个命令免密码输入
+              /etc/rsync.password 内容格式：密码
+             2)密码文件的权限是600
+             3)同步操作：命令分为两种，一个是推，一个是拉
+
+             排错步骤：
+             1)防火墙和selinux
+             2)排错一定要先看日志/var/log/rsyncd.log
+             3)要从部署流程整体考虑排查
+             4)操作习惯要重点注意
+      2.4.2.2 客户端排除打包
+              例子：使用rsync命令将/data1/的所有文件都远程推送到远端主机10.0.0.107的oldboy目录下
+              但是要排除a目录
+              rsync -avz --exclude=a /data1/ rsync_backup@10.0.0.107::oldboy --password-file=/etc/rsync.password 
+              例子：使用rsync命令将/data1/的所有文件都远程推送到远端主机10.0.0.107的oldboy目录下,但是要排除多个目录不推送
+              rsync -avz --exclude={a..g} /data1/ rsync_backup@10.0.0.107::oldboy --password-file=/etc/rsync.password 
+              或者
+              seq 10 >paichu.log
+              rsync -avz --exclude-from=paichu.log /data1/ rsync_backup@10.0.0.107::oldboy --password-file=/etc/rsync.password 
+      2.4.2.3 服务端排除打包 
+              在/etc/rsyncd.conf配置文件的最后一行添加如下配置
+              vim /etc/rsyncd.conf
+              exclude=a b #表示排除a和b目录不执行推送操作
+              pkill rsync或者kill `cat /var/run/rsyncd.pid`
+              rsync --daemon
+              ps -ef | grep rsync
+              rm -fr *
+              rsync -avz /data1/ rsync_backup@10.0.0.107::oldboy --password-file=/etc/rsync.password
+              提示：如果在服务器端的配置文件中已经添加了排除参数，那么在客户端就不用
+              添加排除参数了
+      2.4.2.4 无差异同步原理与实战
+      2.4.2.4.1 Rsync无差异同步的生产场景
+              一般是有需要两台服务器之间，必须要求数据一致，且实时性又不是恨过的情况，例如：两台负载均衡下面WEB服务器之间的同步，或者高可用双机配置之间的同步等，rsync无差异同步非常危险，而且，有很多的替代方案，因此，生产场景没有特殊的需求，应避免使用，写了这么多内容的目的是在警告读者，这个参数很危险，请慎用，切记。有很多朋友有过血的教训
+       2.4.3  配置防火墙允许Rsync服务
+       2.4.3.1 Rsync服务运行的端口
+              rsync服务运行在873/tcp端口
+              netstat -lnt | grep 873
+              cat /etc/service | grep rsync | head -2
+       2.4.3.2 Rsync防火墙配置
+               在生产环境中，可以配置如下三行允许rsync服务，加入到/etc/sysconfig/iptables
+               -A INPUT -s 124.42.63.99/27 -p tcp -m tcp --dport 873 -j ACCEPT
+               #允许固定的办公网发布程序传输同步
+               -A INPUT -s 192.168.100.0/255.255.255.0 -p tcp -m tcp --dport -j ACCEPT
+               #允许IDC内网网段间连接传输同步
+               -A INPUT -s 203.81.19.0/255.255.255.0 -p tcp -m tcp --dport 873 -j ACCEPT
+               #允许IDC内网网段间连接传输同步
+               然后重启iptables使生效 /etc/init.d/iptables restart
+       2.4.4   rsync主配置文件rsyncd.conf配置参数说明
+               参数                                 参数说明
+               uid = root         rsync使用的用户.缺省uid为2，通常为nobody.    
+               gid = root         rsync使用的组(用户所在的组).缺省gid为2 通常为nobody
+               use chroot = no    如果为true，daemon会在给客户端传输文件前"chroot to 
+                                  the  path".这是rsync安/全的一个配置，因为我们大多数都是在内网
+                                  使用rsync，所以不配也可以
+               max connection 200 设置最大连接数，默认为0，
+                                  意为无限制，负值为关闭这个模块
+               timeout =400       默认为0，意为0，timeout的值建议为300-600(5-10分钟)
+               pid file = /var/run   rsync daemon启动后将其进程PID写入此文件。
+                                     如果这个文件
+               rsyncd.pid            已经存在，rsync进程不会覆盖该文件，而会终止
+               lock file = /var/     指定lock文件用来支持"max 
+               run/rysncd.lock       connections"参数，使得总连接数
+                                     不会超过限制，默认为/var/run/rsyncd.lock
+               log file = /var/      不设或者设置错误，
+               /log/ryncd.log        rsync会使用syslog输出相关日志信息
+               ignore errors         忽略I/O错误
+               read only = false     指定客户端是否可以上传文件，
+                                     默认对所有模块都为true
+               list = false          是否允许客户端可以查看可用模块列表，默认为可以
+               hosts allow = 10.0.0  指定可以联系的客户端主机名或和IP地址或地址段，
+               .0/24                 默认情况没有此参数，即都可以连接
+               hosts deny = 0.0.0    指定不可以联系的客户端主机名或IP地址或地址段
+               0/32                  默认情况没有此参数，即都可以连接
+               auth users = rsync    指定以空格或逗号分隔的用户可以使用那些模块，
+               _backup               用户不需在本地系统中存在，
+                                     默认所有用户无密码的访问(anounymous 
+                                     rsync)
+               secrets file =        指定用户名和密码存放的文件，格式：
+               /etc/rsync.password   用户名:密码，密码 
+                                     不超过8位
+               [oldboy]              这里就是模块名称，需用中括号扩起来，
+                                     起名称没有        
+                                     特殊要求，但最好是有意义的名称，以便以后维护
+               path = /oldboy/       在这个模块中，daemon使用的文件系统或目录，
+                                     目录的权限
+                                     要注意和配置文件中的权限一致，否则会遇到读写的问题
+              #exclude = a c d/2     排除的文件或目录，相对路径
+
+              2:拓展的参数说明
+              参数                        说明
+              motd file                   定义当客户端访问时看到的信息，默认没有
+              pid file                    定义rsync daemon将其PID写入的文件，
+                                          如果此文件
+                                          存在，rsync daemon会终止而不是覆盖
+              port                        定义daemon监听的端口，
+                                          (默认是873)，如果daemo
+                                          在被inetd启动时加上 --port参数时，会忽略此参数
+              address                     定义daemon监听的端口(默认是873)
+                                          ，如果daemon被
+                                          inetd启动时加上 --port参数时，会忽略此参数
+              socket options              用来防止被人不停的连接，
+                                          可以设置为所有socket的
+                                          端口的传说速度:faster or slower.会被在命令行的--sockopts覆盖
+              3:模块参数
+              参数                           参数说明
+              comment                   当客户端取得可用模块列表时，
+                                        在模块 名进行显示的
+                                        注示，默认没有
+              path                      在这个模块中，
+                                        daemon可以是哦那个的文件系统，
+                                        必须配置
+              use chroot                如果被设为"true",
+                                        daemon会在给客户端传输文件前 
+                                        "chroot to the path"
+              charset                   设置模块的文件名的存储编码。
+                                        如果客户端使用--icov
+                                        参数，会被失效
+              max connections           设置最大连接数，默认为0，意为无限制，
+                                        负值为关闭这个模块
+              log file                  不设会使用syslog
+              syslog facility           指定syslog的名字来启示录rsync daemon
+              max verbosity             控制信息的最大数量，默认为1，
+                                        允许客户端请求 one
+                                        level of verbosity
+              lock file                 指定文件用来支持"max connections"参数.默认为
+                                        /var/run/rsyncd.lock
+              read only                 指定客户端是否可以上传文件，
+                                        默认对所有模块都为true
+              write only                不允许下载
+              list                      是否允许客户端可以查看可用模块列表，
+                                        默认为可以
+              uid                       指定用户名或UID取代root，默认为-2，意为nobody
+              gid                       指定用户名或UID取代root，
+                                        默认为-2，意为nobody
+              fake super                设为yes,使文件的权限不以root权限
+              filter                    指定filter chain,
+                                        指定哪些文件可以让客户端进入
+              exclude                   排除的文件，相对路径
+              include                   会覆盖exclude
+              exclude from              指定传入文件的权限
+              include from               
+              auth users                指定以空格或分隔的用户可以使用些模块，用户
+                                        不一定要在本地系统中存在。默认所有用户无密码
+                                        的访问(anonymous rsync)
+              secrets file              指定用户名和密码.格式 用户名:密码
+              strict modes              指定secrets file的权限是否被检查.
+                                        true or false
+              hosts allow               指定可以联系的客户端用户名和IP.
+                                        address/mask,a.b c.d,hostname,hostname pattern
+              hosts deny                默认没有
+              ignore errors             忽略I/O错误
+              timeout                   超时参数，默认为0，意 no timeout，
+                                        建议为300-600 (5-10)分钟
+       2.4.5  服务深度实战共享多个目录实战
+              vim /etc/rsyncd.conf
+              uid = rsync
+              gid = rsync
+              use chroot = no
+              max connections = 200
+              timeout = 300
+              pid file = /var/run/rsyncd.pid
+              lock file = /var/run/rsync.lock
+              log file = /var/log/rsyncd.log
+              ignore errors
+              read only = false
+              list = false
+              hosts allow = 10.0.0.0/24
+              hosts deny = 0.0.0.0/32
+              auth users = rsync_backup
+              secrets file = /etc/rsync.password
+              [oldboy]
+              path = /oldboy/
+              [data]
+              path = /data/
+              保存退出
+              rsync -avz rsync_backup@10.0.0.7::data /tmp/ --password-file=/etc/rsync.password
+              mkdir /tmp/oldboy
+              chown -R rsync /data/
+              rsync -avz /tmp/rsync_backup@10.0.0.7::data --password-file=/etc/rsync.password
+        2.4.6 rsync服务深度排错思想详解
+              1：部署流程熟练：
+              2：原理要理解
+              3：学会看日志，命令行输出rsync命令，日志输出(/var/log/rsyncd.log)
+              排除能力的练习
+              1：模拟错误，重视日常错误
+              故障模拟1
+              故障现象:
+              @ERROR: chdir failed
+              rsync error: error starting client-server protocol (code5) at main.c(1503) 
+              故障说明: 当服务端oldboy共享目录被误删除了，会提示的错误信息：
+              故障解决：创建共享目录oldboy
+              2：故障模拟2
+              故障现象：
+              2016/01/09 11:34:23 [28176] params.c:Parameter() -Ignoring badly formed line in configuration file: ignore errors
+              2016/01/09 11:34:23 [28176] name lookup failed for 10.0.0.107: Temporary failure in name resolution
+              2016/01/09 11:34:23 [28176] connect from UNKNOWN(10.0.0.107)
+              2016/01/09 11:34:23 [28176] malformed mask in 10.0.0/0/24
+              2016/01/09 11:34:23 [28176] secrets file must not be other-accessible(see strict modes option)
+              2016/01/09 11:34:23 [28176] continuing without secretsfile
+              2016/01/09 11:34:23 [28176] auth failed on modulezhaofan from unknown (10.0.0.107): missing secret for user"rsync_backup
+              故障说明：当服务端的密码文件/etc/rsync.
+                        password的权限过大时，出现的错误信息提示：（建议设置成600）
+              故障解决：设置共享目录的权限(chown -R rsync /data)
+              3:故障模拟3
+              故障现象：
+              rsync: failed to connect to 10.0.0.7: NO route host (113)
+              rsync error: error in socket IO (code 10) at clientserver.c(124) [sender=3.0.6]
+              故障说明：防火墙了阻止rsync的推送
+              故障解决：正确配置防火墙或关闭防火墙
+              4:故障模拟4
+              故障现象:
+              @ERROR: Unknown module 'oldboy1'
+              rsync error: error starting client-server protocol (code5) at main.c(1503) 
+              故障说明:当服务端的配置文件中关于模块部分出现错误时：
+              故障解决:修改配置文件的共享目录配置
+              5:故障5:在客户端执行rsync -avz rsync_backup@10.0.0.107::oldboy /data1 --password-file=/etc/rsync.password命令时出现以下错误
+              错误现象：
+              receiving incremental file list
+              rsync: opendir "." (in oldboy) failed: Permission denied (13)
+              sent 64 bytes  received 191 bytes  510.00 bytes/sec
+              total size is 0  speedup is 0.00
+              rsync error: some files/attrs were not transferred (see previous errors) (code 23) at main.c(1505) [generator=3.0.6]
+              故障解决：
+              修改执行命令为：rsync -avz rsync_backup@10.0.0.107::oldboy/ /data1 --password-file=/etc/rsync.password
+
+        2.4.7 实战演练1：实现把Web服务器A数据备份到服务器B
+              一：具体要求如下：
+                1)Web服务器A和备份服务器B的备份目录必须都为/backup
+                2)系统配置文件包括但不限于：
+                  A:定时任务服务的配置文件(/var/spool/cron/root)
+                  B:开机自启动的配置文件(/etc/rc.local)
+                  C:日常脚本的目录(/server/scripts)
+                  D:防火墙iptables的配置文件(/etc/sysconfig/iptables)
+                  E:web服务器站点目录
+                  F:web服务器A访问日志路径假定为(/app/logs)
+                  G:web服务器保留打包后的7天的备份数据即可(本地留存不能多余7天，因为太多硬盘会满)，备份服务器B上要保留6个月
+                  的数据副本。
+                  H:备份服务器B上要安装备份数据库的IP为目录保存，打包的文件按照时间名字保存
+             二：实战演练逻辑图
+                 实战演练1.jpg
+             三：实现过程
+                 服务器规划表
+                 服务器             IP地址              描述
+                 rsync-server       10.0.0.9            rsync服务端
+                 rsync-client       10.0.0.8            rsync客户端
+                 一：rsync服务的配置：
+                 rysnc-server服务器端的配置(ip:10.0.0.9)
+                 vim /etc/rsyncd.conf
+                 #rsync_config_ _ _ _ _ _ _ start
+                 #rsyncd.conf start##
+                 uid = rsync
+                 gid = rsync
+                 use chroot = no
+                 max connections = 200
+                 timeout = 300
+                 pid file = /var/run/rsyncd.pid
+                 lock file = /var/run/rsync.lock
+                 log file = /var/log/rsyncd.log
+                 ignore errors
+                 read only = false
+                 list = false
+                 hosts allow = 10.0.10.0/24
+                 hosts deny = 0.0.0.0/32
+                 auth users = rsync_backup
+                 secrets file = /etc/rsync.password
+                 [backup]
+                 path = /backup
+                 保存后退出
+                 mkdir /backup -p
+                 useradd rsync
+                 chown -R rsync.rsync /backup/
+                 ls -ld /backup/
+                 rsync --daemon
+                 lsof -i :873
+                 echo "rsync_backup:oldboy" >>/etc/rsync.password
+                 chmod 600 /etc/rsync.password
+                 rsync-client客户端配置过程(ip:10.0.0.8)
+                 1)创建密码文件，并设置该密码文件的权限为600
+                   echo "oldboy" >/etc/rsync.password
+                   chmod 600 /etc/rsync.password
+                   cat /etc/rsync.password
+                 2)创建本地的推送目录
+                   mkdir /backup -p
+                 3)rsync推送测试
+                  touch /backup/old.txt
+                  rsync -avz /backup/ rsync_backup@10.0.0.9::backup/ --password-file
+                  =/etc/rsync.password
+                 4)在服务器端查看推送是否成功
+                   ll /backup/
+                 二：备份目录文件和数据，并打包
+                 在rsync-client上备份所要求的目录文件和数据
+                 mkdir /var/www/html /app/logs -p
+                 cd /server/scripts/
+                 touch /app/logs/access_$(date +%F -d '1day').log
+                 vim bak.sh
+                 #!/bin/sh
+                 ip=$(ifconfig eth0 | sed -n "2p" | awk -F "[ :]+" '{print $4}')
+                 [ ! -d /backup/$ip ] && mkdir -p /backup/$ip
+                 cd /backup/$ip 
+                 tar zcf bak_$(date +%F).tar.gz /var/www/html/ /app/logs/access_$(date +%F -d '1day').log /server/scripts/ /var/spool/cron /etc/
+                 rsync -az /backup/ rsync_backup@10.0.0.9::backup/ --password-file
+                 =/etc/rsync.password
+                 fine /backup -type f -name "*.tar.gz" -mtime +7|xargs rm -f
+
+                 sh bak.sh
+                 ll /backup/10.0.0.8/
+                 tar tf /backup/10.0.0.8/bak_2017-01-28.tar.gz
+                 crontab -e
+                 00 00 * * * /bin/sh /server/scripts/bak.sh >/dev/null 2>&1
+                 3)在rsync-server(ip:10.0.0.9)上配置脚本,实现备份服务器上要保留6个月
+                  的数据副本。
+                 vim /server/scripts/bak.sh
+                 fine /backup/ -type f -name "*.tar.gz" -mtime +180|xargs rm -f
+                 crontab -e
+                 00 00 * * 6 /bin/sh /server/scripts/bak.sh >/dev/null 2>&1
+                 #每周六0点0分0秒删除180天以前的备份文件和数据
+                 问题三：如何在备份数据后，把备份的成功及失败的信息发送到系统管理员的邮箱
+                 正确思路：服务器端检查结果：
+                 1)du -sh /backup/ip/当天的备份文件 >/tmp/bak.log
+                 或者对比大小，对比修改时间给出成功失败的结果。
+                 2)打包，推送，在推送一个flag(ip+时间的文件名)，本地清理7天前的
+                 3)手工或定时的确包，模拟数据恢复来确认数据备份的完整性
+                 脚本修改1
+                 cd /server/scripts/
+                 vim bak.sh
+                 #!/bin/sh
+                 ip=$(ifconfig eth0 | sed -n "2p" | awk -F "[ :]+" '{print $4}')
+                 [ ! -d /backup/$ip ] && mkdir -p /backup/$ip
+                 cd /backup/$ip 
+                 tar zcf bak_$(date +%F).tar.gz /var/www/html/ /app/logs/access_$(date +%F -d '1day').log /server/scripts/ /var/spool/cron /etc/
+                 rsync -az /backup/ rsync_backup@10.0.0.9::backup/ --password-file
+                 =/etc/rsync.password
+                 [ $? -eq 0 ] && touch ${ip}_flag_$(date +%F)
+                 fine /backup -type f -name "*.tar.gz" -mtime +7|xargs rm -f
+                 如果是第一次推送后，需要再推送一次，才能出现推送后成功的标识记录
+                 定期发送邮件给管理员的脚本
+                 cd /server/scripts/
+                 vim mail.sh
+                 du -sh /backup/* >/tmp/bak.log
+                 for dir in `ls /backup/`
+                 do
+                   if [ -f /backup/$dir/$dir_flag_$(date +%F) ] 
+                    then
+                      echo "$dir bak ok\n",du -sh /backup/* >>/tmp/result_$(date +%F).log
+                   else
+                      echo "$dir bak no" >>/tmp/result_$(date +%F).log
+                   fi
+                 done
+                 [ -f /tmp/result_$(date +%F).log ] &&\\
+                 mail -s "$(date +%F) server bak" 286937899@qq.com </tmp/result_$(date +%F).log
+   
+                 crontab -e
+                 00 06 * * * /bin/sh /server/scripts/mail.sh >/dev/null 2>&1
+                 问题四：假如是对NFS共享服务器的数据做备份，如何实现实时的数据同步？
+                 (说明:因为工作中，NFS服务器可能是单点，我们需要做实时同步，相对于热备NFS服务器。)
+                 对于用户来说：变化的数据：图片，视频，头像，附件等等
+                 内部人员更新：程序文件及相关系统文件，SSHKEY批量分发。Puppet.
+                 拓扑图：
+                 解决NFS单点及性能生产基本方案.jpg
+                 三：inotify的安装和配置
+                 tar xf inotify-tools-3.14.tar.gz
+                 cd inotify-tools-3.14
+                 ./configure --prefix=/usr/local/inotify-tools-3.14
+                 make
+                 make install
+                 ln -s /usr/local/inotify-tools-3.14/ /usr/local/inotify-tools
+                 ll /usr/local/inotify-tools
+                 cd /usr/local/inotify-tools
+                 cd /server/scripts/
+                 vim inotify.sh
+                 #!/bin/sh
+                 cmd="/usr/local/inotify-tools/bin/inotifywait"
+                 $cmd -mrq --format '%w%f' -e create,close_write,delete /backup|\
+                 while read line
+                 do
+                   cd /backup&&\
+                   rsync -az --delete --timeout=100 ./ rsync_backup@10.0.0.9::backup --password-file=/etc/rsync.password
+                 done
+                 sh /server/scripts/inotify.sh &
+                 vim /etc/rc.local
+                 #####
+                 sh /server/scripts/inotify.sh &
+           2.4.8 配置方案小结：
+                 全网数据备份解决方案(rsync定时备份)
+                 1):第一个里程碑:先做好数据同步rsync服务,备份服务器上部署rsync服务
+                 2):第二个里程碑:本地打包备份脚本实现webserver其他需要备份的机器上
+                    可能有多台
+                 3):第三个里程碑:配置定时任务执行脚本OVER
+                 4):第四个里程碑:整体测试，完工
+                 全网数据备份解决方案(rsync+inotify实时备份)
+                 1)第一个里程碑:先做好数据同步rsync服务，在备份服务器上部署rsync服务
+                 2)第二个里程碑:在客户端上配置inotify(sersync)服务(可能是WEB服务器)
+                 3)第三个里程碑:开发同步脚本,测试检查同步情况
+                 4)第四个里程碑:压力测试，观察并发是多少可以实时同步
+                 5)第五个里程碑:后台运行同步脚本，并且放在rc.local
+           2.4.9 总结企业linux运维场景数据同步方案：
+                 1)文件级别同步方案
+                 SCP,NFS,SFTP,HTTP,Samba,rsync,drbd(基于文件系统同步网络RAID1),同步
+                 几乎所有任何数据，
+                 mysql数据库的官方推荐DRBD同步数据，所有单点故障服务例如：NFS,NFS(DRBD)等都可以用DRBD
+                 http://oldboy.blog.51cto.com/2561410/775056
+                 文件级别有利用mysql,mongodb等软件
+                 2)文件系统基本同步
+                 drbd(基于文件系统同步网络RAID1)
+                 3)数据库同步方案
+                  a:自身同步机制：
+                  mysql replication(逻辑的SQL从写机制)
+                  oracle dataguard(物理的就是基于磁盘块，逻辑的就是基于SQL语句重写)
+                  b:第三方drbd,参考URL
+                  http://oldboy.blog.51cto.com/2561410/1240412
+           2.4.10 initofy监控的一个脚本：
+#!/bin/bash
+path="/usr/local/inotify/bin/inotifywait"
+src=/data1/                          
+des=oldboy                             
+rsync_passwd_file=/etc/rsync.password          
+ip1=10.0.0.107                 
+#ip2=10.0.0.108                 
+user=rsync_backup                           
+cd ${src}                           
+$path -mrq --format '%Xe%w%f' -e modify,create,delete,attrib,close_write,move ./ | while read file        
+do
+        INO_EVENT=$(echo $file | awk -F "." '{print $1}')     
+        INO_FILE=$(echo $file | awk -F "/" '{print $2}')       
+        echo $file
+        if [[ $INO_EVENT =~ 'CREATE' ]] || [[ $INO_EVENT =~ 'MODIFY' ]] || [[ $INO_EVENT =~ 'CLOSE_WRITE' ]] || [[ $INO_EVENT =~ 'MOVED_TO' ]]         # 判断事件类型
+        then
+                echo 'CREATE or MODIFY or CLOSE_WRITE or MOVED_TO'
+                rsync -avzcR --password-file=${rsync_passwd_file} ${INO_FILE} ${user}@${ip1}::${des}       
+                #rsync -avzcR --password-file=${rsync_passwd_file} ${INO_FILE} ${user}@${ip1}::${des}
+                 
+        fi
+        #删除、移动出事件
+        if [[ $INO_EVENT =~ 'DELETE' ]] || [[ $INO_EVENT =~ 'MOVED_FROM' ]]
+        then
+                echo 'DELETE or MOVED_FROM'
+                delete=$(ls /data1)
+                for i in ${delete[*]}
+                do
+                rsync -avzRr --delete --password-file=${rsync_passwd_file} ${i} ${user}@${ip1}::${des} 
+                #rsync -avzR --delete --password-file=${rsync_passwd_file} ${INO_FILE} ${user}@${ip1}::${des}
+               done
+        fi
+        #修改属性事件 指 touch chgrp chmod chown等操作
+        if [[ $INO_EVENT =~ 'ATTRIB' ]]
+          then
+                echo 'ATTRIB'
+                if [ ! -d "$INO_FILE" ]                 
+                then
+                    rsync -avzcR --password-file=${rsync_passwd_file} ${INO_FILE} ${user}@${ip1}::${des}                      
+                    #rsync -avzcR --password-file=${rsync_passwd_file} ${INO_FILE} ${user}@${ip1}::${des}
+                fi
+        fi
+done 
+   rsync -artuz -R --delete ./  --timeout=100 rsync_backup@10.0.0.107::oldboy --password-file=/etc/rsync.password >/dev/null 2>&1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+              
+
+
+
+
+
+
+
+
+
+             
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+           
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+         
+
