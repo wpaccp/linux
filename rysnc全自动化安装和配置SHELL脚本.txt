@@ -1,0 +1,140 @@
+                           rysnc全自动化安装和配置SHELL脚本
+=====================================================================================
+. /etc/init.d/functions
+install_epel() {
+  echo "*****CHECK YUM APPLICATION*****"
+  ping -c 1 114.114.114.114 &> /dev/null
+  [ $? -eq 0 ] && yum repolist &>/dev/null 
+  rpm -qa | grep epel &> /dev/null
+  [ $? -eq 0 ] || yum install -y epel-release &> /dev/null
+  [ $? -eq 0 ] && action "YUM APPLICATION Install" /bin/true  || action "YUM APPLICATION install" /bin/false
+  iptables -F
+  [ `grep "=enforcing" /etc/sysconfig/selinux | awk -F "=" '{print $2}'|wc -l` -ne 0 ] && sed -i 's#SLINUX=enforcing#SLINUX=disable#' /etc/sysconfig/selinux 
+} 
+  install_rsync(){
+    echo "****Install Rsync Application****"
+    rpm -qa rsync >/dev/null 2>&1
+    [ $? -eq 0 ] || yum install -y rsync
+    if [ -e /etc/rsyncd.conf ]; then
+      cat >/etc/rsyncd.conf << EOF
+      #created by wpaccp 2017-1-31
+      #QQ 286937899 
+      ##rsyncd.conf start##
+      uid = rsync
+      gid = rsync
+      use chroot = no
+      max connections = 200
+      timeout = 300
+      pid file = /var/run/rsyncd.pid
+      lock file = /var/run/rsync.lock
+      log file = /var/log/rsyncd.log
+      #ignore errors
+      read only = false
+      list = false
+      hosts allow = 10.0.0.0/24
+      hosts deny = 0.0.0.0/32
+      auth users = rsync_backup
+      secrets file = /etc/rsync.password
+      [oldboy]
+      path = /oldboy/
+      #rsync_config_______________end
+      EOF
+    else 
+      touch /etc/rsyncd.conf
+      cat >/etc/rsyncd.conf << EOF
+      #created by wpaccp 2017-1-31
+      #QQ 286937899 
+      ##rsyncd.conf start##
+      uid = rsync
+      gid = rsync
+      use chroot = no
+      max connections = 200
+      timeout = 300
+      pid file = /var/run/rsyncd.pid
+      lock file = /var/run/rsync.lock
+      log file = /var/log/rsyncd.log
+      #ignore errors
+      read only = false
+      list = false
+      hosts allow = 10.0.0.0/24
+      hosts deny = 0.0.0.0/32
+      auth users = rsync_backup
+      secrets file = /etc/rsync.password
+      [oldboy]
+      path = /oldboy/
+      #rsync_config_______________end
+      EOF
+    fi
+    if [ -d /oldboy ]; then
+      chown -R rsync.rsync /oldboy
+    else 
+      mkdir /oldboy -p
+      chown -R rsync.rsync /oldboy
+    fi  
+    id rsync &>/dev/null
+    [ $? -eq 0 ] || useradd rsync -s /sbin/nologin
+    if [ -e /etc/rsync.password ]; then
+      echo "rsync_backup:oldboy" >/etc/rsync.password
+      chmod 600 /etc/rsync.password
+    else
+      touch /etc/rsync
+      echo "rsync_backup:oldboy" >/etc/rsync.password
+      chmod 600 /etc/rsync.password
+    fi
+    [ `netstat -lntup | grep 873 | wc -l` -eq 0 ] && rsync --daemon
+    [ $? -eq 0 ] && action "Install rsync APPLICATION" /bin/true  || action "Install rsync" /bin/false
+  }
+  Main(){
+    install_epel
+    install_rsync
+  }
+  Main
+install_rsync_client() {
+  "****Install Rsync client Application****"
+  iptables -F
+  [ `grep "=enforcing" /etc/sysconfig/selinux | awk -F "=" '{print $2}'|wc -l` -ne 0 ] && sed -i 's#SLINUX=enforcing#SLINUX=disable#' /etc/sysconfig/selinux 
+  rpm -aq rsync &>/dev/null
+  [ -d /etc/data1 ] || mkdir /etc/data1 -p
+  [ $? -eq 0 ] && yum install -y rsync >/dev/null 2>&1
+  if [ -e /etc/rsync.password ]; then
+    echo "oldboy" >>/etc/rsync.password
+    chmod 600 /etc/rsync.password
+  else
+    touch /etc/rsync.password >/dev/null 2>&1
+    echo "oldboy" >>/etc/rsync.password
+    chmod 600 /etc/rsync.password
+  fi 
+}
+Main() {
+  install_rsync_client
+} 
+Main
+这两条命令要在10.0.0.108上执行
+推送案例
+rsync -avz rsync_backup@10.0.0.107::oldboy/ /data1 --password-file=/etc/rsync.password 
+拉回案例
+rsync -avz /data1/ rsync_backup@10.0.0.107::oldboy/ --password-file=/etc/rsync.password 
+
+
+#!/bin/bash
+#
+path="/home/oldboy/tools"
+link="/usr/local/inotify"
+install_inotify() {
+  [ -e $path ] && mkdir -p $path
+  cd $path
+  wget http://github.com/downloads/rvoicilas/inotify-tools/inotify-tools-3.14.tar.gz
+  tar zxf inotify-tools-3.14.tar.gz
+  cd inotify-tools-3.14 
+  ./configure --prefix=/usr/local/inotify-tools-3.14
+  make && make install
+  cd ../
+  ln -s /usr/local/inotify-tools-3.14 $link
+  cd $link
+  ./inotifywait -mrq --format '%w%f' -e create,close_write,delete /data1
+}
+Main(){
+  install_inotify
+}
+Main
+
