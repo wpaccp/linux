@@ -1,0 +1,192 @@
+                                 sersync+rsync原理及部署
+ 一:sersync安装配置
+ sersync同步逻辑图
+ 原理步骤：
+ 1:在同步服务器（Master）上开启sersync服务，sersync负载监控配置路径中的文件系统事件变化；
+ 2:调用rsync命令把更新的文件同步到目标服务器（S1 和 S2）；
+ 3:需要在主服务器配置sersync，在同步目标服务器配置rsync server（注意：是rsync服务）
+ 同步原理：
+ 1:用户实时的往sersync服务器（M）上写入更新文件数据；
+ 2:此时需要在同步主服务器（M）上配置sersync服务；
+ 3:在S1 和S2上开启rsync守护进程服务，以同步拉取来自sersync服务器（M）上的数据；
+ 通过rsync的守护进程服务后可以发现，实际上sersync就是监控本地的数据写入或更新事件；然后，在调用rsync客户端的命令，将写入或更新事件对应的文件通过rsync推送到目标服务器（S1 和S2），如此简单；
+ 1.2 安装环境准备
+ 系统资源列表角色            服务器配置      操作系统版本       IP         机器名
+ sersync服务（M）                 VM            CentOS6.5      10.0.0.108  sersync
+ rsync服务（S1）                  VM            CentOS6.5      10.0.0.107  WEB1
+ 配置rsync(rsync服务器端:ip:10.0.0.107)
+  一：rsync服务的配置：
+  rysnc-server服务器端的配置(ip:10.0.0.107)
+  vim /etc/rsyncd.conf
+  #rsync_config_______________start
+  #created by oldboy 2017-1-31
+  #QQ 286937899 blog:http://oldboy.blog.51cto.com
+  ##rsyncd.conf start##
+  uid = rsync
+  gid = rsync
+  use chroot = no
+  max connections = 200
+  timeout = 300
+  pid file = /var/run/rsyncd.pid
+  lock file = /var/run/rsync.lock
+  log file = /var/log/rsyncd.log
+  #ignore errors
+  read only = false
+  list = false
+  hosts allow = 10.0.0.0/24
+  hosts deny = 0.0.0.0/32
+  auth users = rsync_backup
+  secrets file = /etc/rsync.password
+  [oldboy]
+  path = /oldboy/
+  #rsync_config_______________end
+  保存后退出
+  mkdir /backup -p
+  useradd rsync
+  chown -R rsync.rsync /backup/
+  ls -ld /backup/
+  rsync --daemon
+  lsof -i :873
+  echo "rsync_backup:oldboy" >>/etc/rsync.password
+  chmod 600 /etc/rsync.password
+  二:rsync-client客户端配置过程(ip:10.0.0.8)
+  1)创建密码文件，并设置该密码文件的权限为600
+    echo "oldboy" >/etc/rsync.password
+    chmod 600 /etc/rsync.password
+    cat /etc/rsync.password
+  2)创建本地的推送目录
+    mkdir /backup -p
+  3)rsync推送测试
+    touch /backup/old.txt
+    rsync -avz /backup/ rsync_backup@10.0.0.9::backup/ --password-file=/etc/rsync.password
+  4)在服务器端查看推送是否成功
+    ll /backup/
+  三:sersync软件的安装和配置
+  mkdir -p /applition/tools
+  cd /applition/tools
+  tar fxzsersync2.5.4_64bit_binary_stable_final.tar.gz -C /usr/local/
+  cd /usr/local/
+  mv GNU-Linux-x86 sersync
+  cp sersync/confxml.xml sersync/confxml.xml.$(date +%F)
+  更改优化sersync配置文件：
+  vim sersync/confxml.xml
+  a) 修改24--28行，原来的配置为：
+     <localpathwatch="/opt/tongbu">     # 定义本地要同步的目录
+     <remote ip="127.0.0.1"name="tongbu1"/>
+     <!--<remoteip="192.168.8.39" name="tongbu"/>-->        # 同步到哪台机器上 tongbu模块rsync端模块名字
+     <!--<remoteip="192.168.8.40" name="tongbu"/>-->        # 同步到哪台机器上 tongbu模块
+    </localpath>
+    修改为以下内容配置：
+  	<localpath watch="/data1">
+	    <!--<remote ip="127.0.0.1" name="tongbu1"/>-->
+	    <remote ip="10.0.0.107" name="oldboy"/>
+	    <!--<remote ip="192.168.8.40" name="tongbu"/>-->
+	</localpath>
+   b)修改配置，原来的配置如下：
+	 <rsync>
+            <commonParamsparams="-artuz"/>
+            <auth start="false"users="root" passwordfile="/etc/rsync.pas"/>
+            <userDefinedPortstart="false" port="874"/><!-- port=874 -->
+            <timeoutstart="false" time="100"/><!-- timeout=100 -->
+            <sshstart="false"/>
+     </rsync>
+    修改为以下内容配置：
+	<rsync>
+	    <commonParams params="-artuz"/>
+	    <auth start="true" users="rsync_backup" passwordfile="/etc/rsync.password"/>
+	    <userDefinedPort start="false" port="874"/><!-- port=874 -->
+	    <timeout start="true" time="100"/><!-- timeout=100 -->
+	    <ssh start="false"/>
+	</rsync>
+	c)修改37行,原来的配置
+    <failLogpath="/tmp/rsync_fail_log.sh"timeToExecute="60"/><!--default every 60mins execute once-->
+    修改为以下内容配置：
+    <failLog path="/usr/local/sersync/rsync_fail_log.sh" timeToExecute="60"/><!--default every 60mins execute once-->
+    #当同步失败后，日志记录到/usr/local/sersync/logs/rsync_fail_log.sh文件中，并且每60分钟对失败的log进行重新同步
+    修改后的完整配置文件为：
+    <?xml version="1.0" encoding="ISO-8859-1"?>
+    <head version="2.5">
+    <host hostip="localhost" port="8008"></host>
+    <debug start="false"/>
+    <fileSystem xfs="false"/>
+    <filter start="false">
+	  <exclude expression="(.*)\.svn"></exclude>
+	  <exclude expression="(.*)\.gz"></exclude>
+	  <exclude expression="^info/*"></exclude>
+	  <exclude expression="^static/*"></exclude>
+    </filter>
+    <inotify>
+	  <delete start="true"/>
+	  <createFolder start="true"/>
+	  <createFile start="false"/>
+	  <closeWrite start="true"/>
+	  <moveFrom start="true"/>
+	  <moveTo start="true"/>
+	  <attrib start="false"/>
+	  <modify start="false"/>
+    </inotify>
+
+    <sersync>
+	  <localpath watch="/data1">
+	      <!--<remote ip="127.0.0.1" name="tongbu1"/>-->
+	      <remote ip="10.0.0.107" name="oldboy"/>
+	      <!--<remote ip="192.168.8.40" name="tongbu"/>-->
+	  </localpath>
+	  <rsync>
+	      <commonParams params="-artuz"/>
+	      <auth start="true" users="rsync_backup" passwordfile="/etc/rsync.password"/>
+	      <userDefinedPort start="false" port="874"/><!-- port=874 -->
+	      <timeout start="true" time="100"/><!-- timeout=100 -->
+	      <ssh start="false"/>
+	</rsync>
+	<failLog path="/usr/local/GNU-Linux-x86/rsync_fail_log.sh" timeToExecute="60"/><!--default every 60mins execute once-->
+	<crontab start="false" schedule="600"><!--600mins-->
+	    <crontabfilter start="false">
+		<exclude expression="*.php"></exclude>
+		<exclude expression="info/*"></exclude>
+	    </crontabfilter>
+	</crontab>
+	<plugin start="false" name="command"/>
+    </sersync>
+
+    <plugin name="command">
+	<param prefix="/bin/sh" suffix="" ignoreError="true"/>	<!--prefix /opt/tongbu/mmm.sh suffix-->
+	<filter start="false">
+	    <include expression="(.*)\.php"/>
+	    <include expression="(.*)\.sh"/>
+	</filter>
+    </plugin>
+
+    <plugin name="socket">
+	<localpath watch="/opt/tongbu">
+	    <deshost ip="192.168.138.20" port="8009"/>
+	</localpath>
+    </plugin>
+    <plugin name="refreshCDN">
+	<localpath watch="/data0/htdocs/cms.xoyo.com/site/">
+	    <cdninfo domainname="ccms.chinacache.com" port="80" username="xxxx" passwd="xxxx"/>
+	    <sendurl base="http://pic.xoyo.com/cms"/>
+	    <regexurl regex="false" match="cms.xoyo.com/site([/a-zA-Z0-9]*).xoyo.com/images"/>
+	</localpath>
+    </plugin>
+</head>
+3、开启sersync守护进程同步数据
+   启动命令
+   /usr/local/sersync/sersync2 -d -r -o /usr/local/sersync/confxml.xml
+   配置sersync环境变量
+   echo"PATH=$PATH:/usr/local/sersync/">>/etc/profile
+   source /etc/profile
+   sersync2
+
+
+
+
+
+
+  
+
+
+
+
+
+
