@@ -1,0 +1,120 @@
+                                      NFS服务安装与配置
+ 1：NFS服务器端修改主机名(10.0.0.108)
+    cat /etc/sysconfig/network
+    sed -i 's#localhost.localdomain#WEB-LAMP01#' /etc/sysconfig/network
+    cat /etc/sysconfig/network
+ 2：关闭防火墙和SELINUX服务
+    iptables -L
+    iptables -F
+    cat /etc/selinux/config | grep -Ev "#|SELINUXTYPE"
+    <cat /etc/selinux/config | grep -Ev "#|SELINUXTYPE" | awk -F "=" '{print $2}>
+    如果显示结果为
+    SELINUX=disabled #SELINUX服务为关闭状态
+    如果显示结果为
+    SELINUX=enforcing #SELINUX服务为开启状态
+    需要执行关闭SELINUX服务的操作
+    sed -i 's#SELINUX=enforcing#SELINUX=disable#' /etc/selinux/config
+  3:下载和安装NFS软件包
+     rpm -aq nfs-utils rpcbind #检测是否安装了nfs-utils,rpcbind软件包
+     yum install nfs-utils rpcbind -y #使用YUM源安装方式安装nfs-utils和rpcbind软件包
+     rpm -aq nfs-utils rpcbind 
+  4：启动NFS服务
+     /etc/init.d/rpcbind status #查看rpcbind的启动状态
+     rpcinfo -p localhost
+     rpcinfo: can't contact portmapper: RPC: Remote system error - Connection refused
+     #说明rpcbind服务未启动。
+     /etc/init.d/rpcbind start #启动rpcbind服务
+     rpcinfo -p localhost
+     program vers proto   port  service
+     100000    4   tcp    111  portmapper
+     100000    3   tcp    111  portmapper
+     100000    2   tcp    111  portmapper
+     100000    4   udp    111  portmapper
+     100000    3   udp    111  portmapper
+     100000    2   udp    111  portmapper #说明rpcbind服务已经正常启动
+     lsof -i :111 #查看rpcbind服务的端口状态
+     COMMAND  PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+     rpcbind 2006  rpc    6u  IPv4  12587      0t0  UDP *:sunrpc 
+     rpcbind 2006  rpc    8u  IPv4  12590      0t0  TCP *:sunrpc (LISTEN)
+     rpcbind 2006  rpc    9u  IPv6  12592      0t0  UDP *:sunrpc 
+     rpcbind 2006  rpc   11u  IPv6  12595      0t0  TCP *:sunrpc (LISTEN)
+     /etc/init.d/nfs start #启动NFS服务
+     netstat -lntup|grep 2049 #查看NFS服务的端口状态
+     tcp        0      0 0.0.0.0:2049                0.0.0.0:*                   LISTEN      -                   
+     tcp        0      0 :::2049                     :::*                        LISTEN      -                   
+     udp        0      0 0.0.0.0:2049                0.0.0.0:*                               -                   
+     udp        0      0 :::2049                     :::*                                    - 
+     echo "/etc/init.d/rpcbind start" >>/etc/rc.local
+     echo "/etc/init.d/nfs start" >>/etc/rc.local #把/etc/init.d/nfs或/etc/init.d/rpcbind启动命令放在开机自启动程序/etc/rc.local中 
+     cat /etc/rc.local
+     <#!/bin/sh
+     #
+     # This script will be executed *after* all the other init scripts.
+     # You can put your own initialization stuff in here if you don't
+     # want to do the full Sys V style init stuff.
+     touch /var/lock/subsys/local
+     /etc/init.d/rpcbind start
+     /etc/init.d/nfs start>
+   5:配置NFS服务端
+     ls -l /etc/exports
+     -rw-r--r--. 1 root root 0 Jan 12  2010 /etc/exports
+     提示：NFS默认配置文件/etc/exports是存在的，但默认是没有内容的，需要自行配制，
+     有些linux版本也可能不提供/etc/exports配置文件，这时就需要手动创建
+     echo "/data1 10.0.0.0/24(rw,sync,all_squash)" >> /etc/exports
+     cat /etc/exports
+     </data1 10.0.0.0/24(rw,sync,all_squash)>
+     exportfs -rv
+     <exporting 10.0.0.0/24:/data1>
+     /etc/init.d/nfs reload
+     grep "reload" -A 1 /etc/init.d/nfs
+   6:NFS客户端挂载共享目录(10.0.0.109)
+     rpm -aq nfs-utils rpcbind
+     yum install nfs-utils rpcbind -y 
+     /etc/init.d/rpcbind start
+     echo "/etc/init.d/rpcbind start" >>/etc/rc.local
+     showmount -e 10.0.0.108
+     Export list for 10.0.0.108:
+     /data1 10.0.0.0/24
+     mount -t nfs 10.0.0.108:/data1 /oldboy
+     echo "mount -t nfs 10.0.0.108:/data1 /oldboy" >>/etc/rc.local
+   7:NFS客户端挂载共享目录(10.0.0.107)
+     rpm -aq nfs-utils rpcbind
+     yum install nfs-utils rpcbind -y 
+     /etc/init.d/rpcbind start
+     echo "/etc/init.d/rpcbind start" >>/etc/rc.local
+     showmount -e 10.0.0.108
+     Export list for 10.0.0.108:
+     /data1 10.0.0.0/24
+     mount -t nfs 10.0.0.108:/data1 /oldboy
+     echo "mount -t nfs 10.0.0.108:/data1 /oldboy" >>/etc/rc.local
+    8:常见故障
+    在共享目录里执行 touch dd.txt命令时出现以下故障：
+    touch: cannot touch `dd.txt': Permission denied
+    解决办法：
+    在NFS服务器端执行如下命令：
+    chown -R nfsnobody /data1 
+    或者执行如下命令：
+    useradd nfs
+    echo "/data1 10.0.0.0/24(rw,sync,all_squash,anonuid=500,anongid=500)" > /etc/exports
+    chown -R nfs /data1
+    /etc/init.d/rpcbind reload
+    /etc/init.d/nfs reload
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
