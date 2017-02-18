@@ -1,0 +1,252 @@
+                      rsync+inotify实现远程实时同步配置与文件并发测试
+    1.1 Rsync+inotify 实时数据同步 inotify Master端的配置
+    1.1.1 rsync+inotify组合的起源
+          rsync(remote sync) 远程同步工具，
+          通过rsync可以对远程服务器数据进行增量备份同步，但是rsync自身也有瓶颈
+          ,同步数据时，rsync采用核心算法对远程服务器的 目标文件进行比对，支进行差异同步，我们可以想象一下，如果服务器的文件
+          数量达到了百万甚至千万量级，那么文件对比将是非常耗时的，而且发生变化
+          的往往是其中很少一部分，这是非常低效的方式，inotify的出现，可以缓解
+          rsync不足之处，取长补短
+    1.1.2 inotify简介
+          inotify是一种强大的，细粒度的，异步的文件系统事件监控机制，linux内核从
+          2.6.13起，加入了inotify支持，通过inotify可以监控文件系统中添加，删除，
+          修改，移动等各种事件，利用这个内核接口，第三方软件就可以监控文件系统下文件的各种变化情况，而inotify-tools正是实施这样监控的软件。sersync
+          特别说明：下面的inotify配置是建立在rsync服务基础上的配置过程
+          rsync -avzP --timeout=100 /data0/www/www/ rsync_backup@10.0.0.191::www/ --password-file=/etc/rsync.password
+          提示：inotify的实现有几款软件：inotify,sersync,lsyncd
+      1.3 系统架构拓扑
+      1.4 inotify实施准备
+          大前提rsync daemon服务配置成功，可以再客户端推送拉取数据，然后才能配置
+          inotify服务
+      1.5 开始安装(inotify要在客户端上配置)
+          在安装inotify-tools前请先确认你的linux内核是否达到了2.6.13，并且在编译时开启
+          CONFIG_INOTIFY选项，也可以通过以下命令检测
+          1)查看当前系统是否支持inotify
+            uname -r
+            ls -l /proc/sys/fs/inotify
+            max_queued_events:最大事件队列，事件最大值
+            max_user_instances:用户事例
+            max_user_watches:
+          2)下载inotify源码包
+            mkdir -p /home/oldboy/tools
+            cd /home/oldboy/tools/
+            wget http://github.com/downloads/rvoicilas/inotify-tools/inotify-tools-3.14.tar.gz
+            故障1
+            故障现象
+            OpenSSL: error:14077410:SSL routines:SSL23_GET_SERVER_HELLO:sslv3 alert handshake failure
+            故障解决
+
+            ls inotify-tools-3.14.tar.gz
+          3)编译安装inotify
+            tar zxf inotify-tools-3.14.tar.gz
+            cd inotify-tools-3.14
+            ./configure --prefix=/usr/local/inotify-tools-3.14
+            make && make install
+            cd ../
+            ln -s /usr/local/inotify-tools-3.14 /usr/local/inotify
+            参数：
+            --prefix=PATH 指定编译安装的路径
+            提示：更多的编译蚕食可以使用./configure -h查看，编译成功后会生成4个目录，分别是：
+            ll
+            bin #inotify 执行命令(二进制)
+            include #inotify 程序所需用的头文件
+            lib #动态链接的库文件
+            share #帮助文档
+            cd /usr/local/inotify-tools/
+            tree
+            4) inotifywait 命令常用参数详解
+            ./bin/inotifywait -help
+            -r|--recursive #递归查询目录
+            -q|--quiet #打印很少的信息，仅仅打印监控事件的信息
+            -m|--monitor #始终保持事件监听状态
+            --excludei<pattern> #排除文件或目录，不区分大小写
+            --timefmt<fmt> #指定时间输出的格式
+            --format<fmt> # 打印使用指定的输出类似格式字符串
+            -e|--event<event1> [-e|--event<event2>...] Listen for specific event(s).
+            if omitted,all event are listened for.
+            #通过在此参数可以指定需要监控的事件，如下所示
+            Events:
+            access    file or directory contents were read #读取或目录被读取
+            modify    file or directory contents were written #文件或目录内容被修改
+            attrib    file or directory attributes changed #文件或目录属性被改变
+            close     file or directory closed,regardless of read/write mode #文件或目录封闭，无论读/写模式。
+            open      file or directory opened #文件或目录被打开
+            moved_to  file or directory moved to watched directory #文件或目录被移动至另一个目录移动至当前目录。
+            move      file or directory moved to or from watched directory #文件或目录
+            被移动另一个目录或从另一个目录移动至当前目录。
+            create    file or directory create within watched directory #文件或目录被
+            创建在当前目录
+            delete    file or directory deleted within watched directory #文件或目录被删除
+            unmount   file system containing file or directory unmounted #文件系统被卸载
+
+            通过下面命令可以看到上述参数细节
+            4)人工测试监控事件
+            开启两个窗口
+            1:测试create
+            mkdir /backup
+            /usr/local/inotify-tools-3.14/bin/inotifywait -mrq --timefmt '%d/%m/%y %H:%M' --format '%T%w%f' -e create /backup
+            2:测试delete
+            /usr/local/inotify-tools-3.14/bin/inotifywait -mrq --timefmt '%d/%m/%y %H:%M' --format '%T %w%f' -e create,delete /backup
+            touch del.log
+            rm -f del.log
+            3:测试close_write
+            touch close_write.log
+            echo 11 >close_write.log
+            rm -f close_write.log
+            /usr/local/inotify-tools-3.14/bin/inotifywait -mrq --timefmt '%d/%m/%y %H:%M' --format '%T%w%f' -e create,delete,close_write /backup
+            提示，如果你使用create,close_write这两个参数后，rsync会监听两次。
+            简化事件输出：
+            /usr/local/inotify/bin/inotifywait -mrq --format '%w%f' -e create /backup
+            #!/bin/bash
+            cmd="/usr/local/inotify/bin/inotifywait"
+            $path -mrq --format '%w%f' -e create,close_write,delete /backup |\
+            while read line
+            do
+              rsync -az --delete $line rsync_backup@10.0.0.7::oldboy --password-file=/etc/rsync.password
+            done
+            mkdir /backup/a
+            5)编写inotify实时监控脚本：
+            mkdir /server/scripts/ -p
+            vim /server/scripts/inotify.sh
+            事件监控脚本
+            rsync   参数               src: user@host01::dst          rsync_passfile
+            rsync -avz -P --delete /backup rsync_backup@10.0.0.178::  --password-file
+                                           backup/                    =/etc/rsync. 
+                                                                      password
+            rsync -avz -P --delete rsync_backup@10.0.0.178::backup/ --password-file=/etc/rsync.password                               
+            (5)编写inotify实时监控脚本
+              事件相关参数大小
+              默认：
+              cat max_queued_events
+              cat max_user_instances
+              cat max_user_watches
+              关键参数
+              cat /proc/sys/fs/inotify/max_user_watches
+              cat /proc/sys/fs/inotify/max_queued_events
+              mkdir /server/scripts/ -p #创建专用来存放脚本的目录
+              vim /server/scripts/inotify.sh(只对目录下所有内容进行同步处理)
+              #!/bin/bash
+              #para
+              host01=10.0.0.7 #要同步的主机
+              src=/backup
+              dst=oldboy
+              user=rsync_backup
+              rsync_passfile=/etc/rsync.password
+              inotify_home=/usr/local/inotify-tools-3.14/
+              #just
+              if [ ! -e "$src" ] || [ ! -e "${rsync_passfile}" ] || [ ! -e "${inotify_home}/bin/inotifywait" ] || [ ! -e "/usr/bin/rsync" ];
+              then
+                echo "Check File and Folder"
+                exit 9
+              fi
+              ${inotify_home}/bin/inotifywait -mrq -timefmt '%d/%m/%y %H:%M' --format '%T%w%f' -e close_write,delete,create,attrib $src \
+              | while read line
+                    do
+                    cd $src && rsync -aruz -R --delete ./ --timeout=100 $user@$host01::$dst --password-file=${rsync_passfile} >/dev/null 2>&1
+                    done
+              exit 0
+              sh /server/scripts/inotify.sh &
+              ps -ef | grep inotify.sh
+              脚本修改1(对固定的文件进行同步，属于精准同步)
+              vim /server/scripts/inotify1.sh
+              #!/bin/bash
+              cmd="/usr/local/inotify/bin/inotifywait"
+              $cmd -mrq --format '%w%f' -e create,close_write,delete /backup|\
+              while read line
+              do
+                [ ! -e "$line" ] && continue
+                resync -az --delete $line rsync_backup@10.0.0.7::oldboy --password-file=/etc/rsync.password
+              done
+              故障问题1：
+              /usr/local/inotify-tools-3.14/bin/inotifywait: error while loading shared libraries: libinotifytools.so.0:cannot open shared object file
+              :No such file or directory
+              故障解决：
+              echo "/usr/local/inotify-tools-3.14/lib" >>/etc/ld.so.conf
+              tail -1 /etc/ld.so.conf
+              ldconfig
+              7)查看命令脚本的执行程序是否执行：
+              ps -ef | grep inotify
+              8)也可以先 sh -x inotify 测试脚本执行效果
+              成功后在sh inotify.sh &
+              9)通过start/stop 控制 inotify.sh脚本的启动停止
+              cat syncd
+              #!/bin/bash
+              #####################################
+              #this scripts is created by wpaccp
+              #QQ:286937899
+              #####################################
+              . /etc/init.d/functions
+              if [ $# -ne 1 ]; then
+                 usage: $0 {start|stop}
+                 exit 1
+              fi
+              case "$1" in
+              start)
+                  /bin/bash /server/scripts/inotify.sh &
+                  echo $$ >/usr/local/inotify/i.pid
+                 if [ `ps -ef | grep inotify |wc -l` -gt 2 ]; then
+                   action "inotify service is started" /bin/true
+                 else
+                   action "inotify service is started" /bin/false
+                 fi
+                 ;;
+              stop)
+                 kill -9 `cat /usr/local/inotify/i.pid` >/dev/null 2>&1
+                 pkill inotifywait
+                 sleep 1
+                 if [ `ps -ef|grep inotify|wc -l` -eq 0 ]; then
+                   action "inotify service is stopped" /bin/true
+                 else
+                   action "inotify service is stopped" /bin/false
+                 fi
+                 ;;
+              *)
+                 usage: $0 {start|stop}
+                 exit 1
+              easc
+              10)在监控目录下面创建100个目录测试：
+              for n in `seq 100`;do mkdir /data0/www/www/$n; done
+              11)在rsync服务器端验证是否成功:
+              至此，使用rsync+inotify来实现实时远程同步完成：
+              12)参考资料
+              http://github.com/rvoicilas/inotify-tools/wiki
+              13)inotify参数优化及压力测试同步
+              事件相关参数大小
+              cat max_queued_events
+              cat max_user_instances
+              cat max_user_watches
+              三个参数的值调大
+              14)Rsync+inotify实时数据同步并发简单测试
+              实时同步并发测试
+              每秒100个并发：
+              paste inotify_100_sersync_server.log inotify_100_backup_server.log >in
+              otify_100.txt
+              cat inotify_100.txt
+              awk '{if($1==$3) print $1" "$2" "$4" "(($2-$4));}' inotify_100.txt
+
+              提示：每秒钟请求数范围在200-300个请求，请求大小文件的大小一般在范围在10-500K左右
+              inotify缺点
+              1)并发不能大于200个文件(10-100K)
+              2)我们前面写的脚本，每次都是全部推送一次
+     
+                 
+
+
+
+
+
+
+
+              
+
+
+
+
+
+
+
+
+            
+
+
+
