@@ -1,0 +1,253 @@
+                               keepalived实现服务高可用功能
+   1.1 配置keepalived实现服务高可用功能
+       keepalived的官方站点是http://www.keepalived.org,官方文档:http://www.keepalived.org/documentation.html
+       通过官方地址我们可以获取到keepalived软件包，整个安装步骤如下
+   1.1.1 下载keepalived软件包
+        mkdir -p /home/oldboy/tools
+        cd /home/oldboy/tools
+        wget http://www.keepalived.org/software/keepalived-1.1.19.tar.gz
+   1.1.2 安装keepalived
+        提示：安装前请确认路径：--with-kernel-dir=/usr/src/kernels/2.6.32-358.el6.x86_64，如果没有此路径，请看下面的补充安装说明
+        ln -s /usr/src/kernels/2.6.32-358.el6.x86_64 /usr/src/linux
+        提示：读者安装时，有可能会没有/usr/src/kernels/2.6.32-358.el6.x86_64x86_64,这是因为缺少kernel软件包，此时需要提前通过yum install kernel-devel -y命令来安装。
+        tar zxf keepalived-1.1.19.tar.gz
+        cd keepalived-1.1.19
+        ./configure
+        make
+        make install
+        适合于centos5.X和centos6.X
+        错误1：一般6.4有这个错误
+        checking for openssl/ssl.h... no
+        configure: error
+          !!! openSSL is not properly installed on your system
+          !!! Can not include OpenSSL headers files
+        解决办法：
+        yum install openssl* -y
+        错误2：一般6.4有这个错误
+        check for poptGetContext in -lpopt ... no
+        configure: error: Popt libraries is required
+        uname -a
+        解决办法：
+        yum install popt* -y
+        下面是keepalive configure 后的正确结果：
+   1.3 编译参数说明
+       ./configure -help
+       --with-kernel-dir=DIR #这个是很重要的参数，但这个参数并不是要把keepalived编译进内核，而是指定使用内核源码里面的头文件，就是include目录，如果使用LVS时，才需要用到此参数，否则不需要
+       --disable-lvs-syncd #do not use LVS synchronization daemon
+       --disable-lvs #do not use the lvs framework
+       提示：如果只想做keepalived其他服务(http,db,nginx,haproxy)高可用而不做LVS的高可用，可以使用--disable-lvs和--disable-lvs-syncd禁止LVS功能
+       ，本文做单独演示keepalived高可用性服务，又要演示LVS高可用服务，因此，不加这个参数。
+   1.4 配置规范启动
+      /bin/cp /usr/local/etc/rc.d/init.d/keepalived /etc/init.d <=生成启动脚本命令
+      /bin/cp /usr/local/etc/sysconfig/keepalived /etc/sysconfig/ #<=配置启动脚本的参数
+      mkdir /etc/keepalived -p #===>创建默认的keepalived配置文件路径
+      /bin/cp /usr/local/etc/keepalived/keepalived.conf /etc/keepalived/ #===>把keepalived.conf模板拷贝到/etc/keepalived下
+      /bin/cp /usr/local/sbin/keepalived /usr/sbin/
+      /etc/init.d/keepalived start
+      ps -ef | grep keep
+      /etc/init.d/keepalived stop
+
+      以上过程可以再编译时加入如下解决:C64
+      ./configure --sysconf=/etc
+      cp /usr/local/sbin/keepalived /usr/bin/
+  1.5 keepalive.conf 实现IP接管部分参数说明
+      ！Configuration File for keepalived
+
+      global_def {
+         notification_email 286937899@qq.com #收件人邮箱地址，可配置也可不配置
+      }
+         notification_email_from Alexandre.Cassen@firewall.loc #发件人的邮箱地址
+         smtp_server 10.0.0.1
+         smtp_connect_timeout 30
+         router_id LVS_7 #该值要求必须是唯一的
+      }
+
+      vrrp_instance VI_1 {
+          state MASTER
+          interface eth0
+          virtual_router_id 55 #如果只从服务器是一个实例，virtual_router_id的值要求两边都一样
+          priority 150 #优先级值大的是MASTER，
+          advert_int 1 #接管的间隔时间
+          authentication { #授权
+              auth_type PASS
+              auth_pass 1111
+          }
+          提示:官方建议auth_pass的值就使用明文，不建议使用密文
+          virtual_ipaddress { 
+              10.0.0.9/24  #realserver的IP地址
+          }
+
+      }
+  1.6 keepalived健康检查方式
+      Keepalived健康检查方式配置
+      HTTP_GET|SSL_GET
+      HTTP_GET | SSL_GET
+      {
+       url {
+            path /# HTTP/SSL 检查的url 可以是多个
+            digest <STRING> # HTTP/SSL 检查后的摘要信息 用工具genhash生成
+            status_code 200# HTTP/SSL 检查返回的状态码
+           }
+      connect_port 80 # 连接端口
+      bindto <IPADD>
+      connect_timeout 3 # 连接超时时间
+      nb_get_retry 3 # 重连次数
+      delay_before_retry 2 #连接间隔时间
+     } 
+     # END OF HTTP_GET|SSL_GET
+     TCP健康检查方式
+     TCP_CHECK {
+                connect_timeout 5 #连接超时时间
+                nb_get_retry 3#重连次数
+                delay_before_retry 3 #重连间隔时间
+                connect_port 80 #健康检查的端口
+               } 
+     # TCP_CHECK
+     SMTP健康检查方式
+     SMTP_CHECK {
+     host {
+           connect_ip <IP ADDRESS>
+           connect_port <PORT> # 默认检查端口25
+          }
+     connect_timeout <INTEGER>
+     retry <INTEGER>
+     delay_before_retry <INTEGER>
+     helo_name <STRING>|<QUOTED-STRING> # "请求命令参数，可选
+     } 
+     #SMTP_CHECK
+     MISC
+     MISC_CHECK {
+                 misc_path <STRING>|<QUOTED-STRING># 外部程序或者脚本路径
+                 misc_timeout <INT># 执行脚本的超时时间
+                 misc_dynamic#如果设置了misc_dynamic,healthchecker程序的退出状态码会用来动态调整服务器的权重（weight）.
+     #返回0：健康检查OK，权重不被修改
+     #返回1：健康检查失败，权重设为0
+     #返回2-255：健康检查OK，权重设置为：退出状态码-2，比如返回255，那么weight=255-2=253
+     }
+     工具genhash使用
+     [root@localhost bin]# ./genhash -h
+     genhash v1.0.0 (18/11, 2002)
+     Usage:
+     ./genhash -s server-address -p port -u url
+     ./genhash -S -s server-address -p port -u url
+     ./genhash -h
+     ./genhash -r
+     Commands:
+     Either long or short options are allowed.
+    ./genhash --use-ssl-SUse SSL connection to remote server.
+    ./genhash --server-sUse the specified remote server address.
+    ./genhash --port-pUse the specified remote server port.
+    ./genhash --url-uUse the specified remote server url.
+    ./genhash --use-virtualhost -VUse the specified virtualhost in GET query.
+    ./genhash --verbose-vUse verbose mode output.
+    ./genhash --help-hDisplay this short inlined help screen.
+    ./genhash --release-rDisplay the release number
+    工具产生结果如下：
+    [root@localhost bin]# ./genhash -s 10.7.11.12 -p 80 -u http://10.7.11
+    .40/index.html
+    MD5SUM = b7bd8391367e4cf9e4e85263ce313ae8
+    配置如下：  
+    real_server 10.7.11.12 80 {
+    weight 1
+    TCP_CHECK {  
+               connect_timeout 5
+               nb_get_retry 3
+               delay_before_retry 3
+               connect_port 80
+              }
+    HTTP_GET {
+    url { 
+         path /
+         digest b7bd8391367e4cf9e4e85263ce313ae8
+         status_code 200
+        }
+    #url { 
+          #path /mrtg/
+          #digest 9b3a0c85a887a256d6939da88aabd8cd
+    #}
+    connect_timeout 3
+    nb_get_retry 3
+    delay_before_retry 3
+    }
+ }
+    TCP健康检查方式配置例子：
+    real_server 192.168.191.130 80 {
+    weight 3
+    inhibit_on_failure #在服务器健康检查失效时，将其设为0
+    TCP_CHECK {
+               connect_timeout 5 #连接超时时间
+               nb_get_retry 3#重连次数
+               delay_before_retry 3 #重连间隔时间
+               connect_port 80 #健康检查的端口
+              }
+    }
+     SSL健康检查方式同HTTP，例子如下：
+     virtual_server 192.168.200.100 443 {
+     delay_loop 6
+     lb_algo rr 
+     lb_kind NAT
+     persistence_timeout 50
+     protocol TCP
+     real_server 192.168.201.100 443 {
+     weight 1
+     SSL_GET {
+     url { 
+          path /
+          digest ff20ad2481f97b1754ef3e12ecd3a9cc
+     }
+     url { 
+          path /mrtg/
+          digest 9b3a0c85a887a256d6939da88aabd8cd
+     }
+     connect_timeout 3
+     nb_get_retry 3
+     delay_before_retry 3
+    }
+    }
+    }
+    SNMP方式例子：
+    real_server 172.16.1.12 25 {
+    weight 1
+    SMTP_CHECK {
+                connect_timeout 10
+                retry 2
+                delay_before_retry 5
+                helo_name "foo.bar.com"
+    host {
+          connect_ip 172.16.1.12
+          connect_port 25
+          bindto 172.16.1.2
+         }
+    host {
+          connect_ip192.168.155.11
+          connect_port 25
+          bindto 192.168.155.2
+         }
+    host {
+          connect_ip64.233.167.100
+          connect_port 587
+         }
+         }
+         }
+        MISC方式脚本带参数例子：
+        real_server 192.168.200.6 1358 {
+        weight 1
+        MISC_CHECK {
+                    misc_path "/usr/local/bin/script.sh arg1 arg2"
+                   }
+        }
+        MISC方式脚本不带参数例子：
+        real_server 192.168.200.6 1358 {
+        weight 1
+        MISC_CHECK {
+                    misc_path /usr/local/bin/script.sh!misc_dynamic
+        }
+        }
+
+
+
+
+
+
+
+
