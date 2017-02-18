@@ -1,0 +1,454 @@
+                             生产场景中负载均衡LVS集群架构细节说明
+    95%的互联网企业会选择DR模式作为LVS的模式。也可有可能不用LVS，而直接用nginx,haproxy
+    1)IDC机房托管IP段和工作中服务器IP配置案例
+    IDC机房提供的公网地址：16个
+    IP:124.42.60.66--124.42.60.81
+    MASK:255.255.255.224
+    GW:124.42.60.80
+    每个RS节点的IP配置为：
+    RS1:                                RS2:
+    eth0:IP:124.42.60.67                IP:124.42.60.68
+    MASK:255.255.255.224                MASK:255.255.255.224
+    GW:124.42.60.80                     GW:124.42.60.80
+    eth1:IP:10.0.0.67                   eth1:IP:10.0.0.68
+    MASK:255.255.255.0                  MASK:255.255.255.0
+    2)DR模式WEB业务等前端服务器LVS架构细节
+    1)列出服务器IP配置列表
+    主机           外网eth0        内网eth1
+    LVS01          124.42.60.75    10.0.0.75
+    LVS02          124.42.60.76    10.0.0.76
+    RS01           124.42.60.67    10.0.0.67
+    RS02           124.42.60.68    10.0.0.78
+    业务VIP        124.42.60.78
+    (2)配置DNS解析：www.etiantian.org ===>VIP:124.42.60.78
+    (3)使用keepalived控制LVS转发，配置文件如下：
+    virtual_server 124.42.60.78 80 {
+         delay_loop 6
+         lb_algo wrr
+         lb_kind DR
+         nat_mask 255.255.255.0
+         persistence_timeout 50
+         protocol TCP
+         #ipvsadm -A -t 124.42.60.78 80 -s wrr -p 50
+    }
+    real_server 124.42.60.67 80 {
+        weight 1
+        TCP_CHECK {
+        connect_timeout 8
+        nb_get_retry 3
+        delay_before_retry 3
+        connect_port 80
+        }
+    }
+     real_server 124.42.60.68 80 {
+        weight 1
+        TCP_CHECK {
+        connect_timeout 8
+        nb_get_retry 3
+        delay_before_retry 3
+        connect_port 80
+        }
+    }
+    强调：除了WEB业务外，一般来说只要是直接对外的业务我们尽可能用上述的IP配置方式，当然了，所有RS也可以指定一个网关出口，不过这个网关又成为了业务瓶颈了。
+    3)DR模式不直接对外提供服务的后端服务器LVS架构细节
+    例如：数据库主或从服务器，memcached和LVS架构细节
+    (1)服务器IP配置列表
+    主机名             内网eth1
+    LV01               10.0.0.7
+    LV02               10.0.0.8
+    RS01               10.0.0.17
+    RS02               10.0.0.18
+    业务VIP            10.0.0.19
+    (2)配置host或内部DNS解析：db-1-1.etiantian.org===>vip:10.0.0.19
+    (3)使用keepalived控制LVS转发，配置文件如下:
+    virtual_server 10.0.0.19 80 {
+         delay_loop 6
+         lb_algo wrr
+         lb_kind DR
+         nat_mask 255.255.255.0
+         persistence_timeout 50
+         protocol TCP
+         #ipvsadm -A -t 10.0.0.30:80 -s wrr -p 50
+    }
+    real_server 10.0.0.17 80 {
+        weight 1
+        TCP_CHECK {
+        connect_timeout 8
+        nb_get_retry 3
+        delay_before_retry 3
+        connect_port 80
+        }
+    }
+    real_server 10.0.0.18 80 {
+        weight 1
+        TCP_CHECK {
+        connect_timeout 8
+        nb_get_retry 3
+        delay_before_retry 3
+        connect_port 80
+        }
+    }
+    4)上产中很可能会有多实例互为主从的配置)
+    其实就是两边都是多实例，但是同一个VIP只能一边提供业务服务
+    没个实例一般是一个业务服务，一组LVS的全部的实例可能多达几十都上几百
+    5)DNS轮询调度解决单主的问题
+    常规的扩展LVS集群的方法
+    6)有些公司还利用交换机的OSPF路由实现LVS多主的模式
+    见http://my.oschina.net/lxcong/blog/143904
+    7)LVS+Keepalived实现httpd负载均衡和高可用性
+    拓扑图
+    LVS+keepalived拓扑图.jpeg
+    服务器的配置列表
+    主机           IP地址              描述
+    LVS01          192.168.100.101    LVS主服务器
+    LVS02          192.168.100.102    LVS从服务器
+    RS01           192.168.100.8      后端的web服务器01
+    RS02           192.168.100.9      后端的web服务器02
+    业务VIP        192.168.100.240    VIP虚拟IP地址
+    一：安装和配置LVS服务器
+    1)安装LVS服务器(在LVS01和LVS02两台服务器上配置)
+    mkdir /application/lvs -p
+    cd /application/lvs
+    wget http://www.linuxvirtualserver.org/software/kernel-2.6/ipvsadm-1.26.tar.gz
+    ls -ld /usr/src/kernels/`uname -r`/
+    如果出现"/usr/src/kernels/2.6.32-431.el6.x86_64"说明kernel-devel-2.6.32-431.el6.x86_64软件包已经安装，如果没有出现上述结果，说明该软件包没有安装，需要执行额外
+    执行yum install kernel-devel -y，开始安装kernel-devel-2.6.32-431.el6.x86_64软件包
+    yum install kernel-devel -y
+    ln -s /usr/src/kernels/2.6.32-431.el6.x86_64 /usr/local/linux
+    tar zxf ipvsadm-1.26.tar.gz
+    cd ipvsadm-1.26
+    make
+    make install
+    lsmod | grep ip_vs
+    /sbin/ipvsadm或者modprobe ip_vs
+    cd ../
+    lsmod | grep ip_vs
+    如果在执行make命令时出现以下错误提示，
+    ...
+    libipvs.c:1071: error:'NLM_F_DUMP' undeclared(first use in this function)
+    ipbipvs.c 1072: error:too many arguments to function 'ipvs_nl_send_message'
+    make[1]: *** [libipvs.o] Error 1
+    make[1]: Leaving directory `/home/oldboy/tools/ipvsadm-1.2.6/libipvs`
+    make: *** [libs] Error 2
+    原因：ipvsadm1.26适用于kernel 2.6.28及之后的内核版本，不适合centos5.x 64bit环境
+    如果符合了系统环境后，同样需要先安装依赖包yum install libnl* popt* -y 因此建议还是使用ipvsadm-1.2.4，比较稳定
+    yum install libnl* popt* -y 
+    ifconfig eth0:0 192.168.100.240 netmask 255.255.255.0 up
+    route add -host 192.168.100.240 dev eth0
+    配置后的检查结果:
+    ifconfig eth0:0
+    2)手工在每个RealServer端配置VIP绑定(在RS01和RS02服务器上配置)
+    ifconfig lo:0 192.168.100.240 netmask 255.255.255.255 up
+    route add -host 192.168.100.240 dev lo
+    3)手工在每个RealServer端配置抵制ARP响应(在RS01和RS02服务器上配置)
+    echo "1" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+    echo "2" >/proc/sys/net/ipv4/conf/lo/arp_announce
+    echo "1" >/proc/sys/net/ipv4/conf/all/arp_ignore
+    echo "2" >/proc/sys/net/ipv4/conf/all/arp_announce
+    二：安装和配置keepalived服务器
+    1)安装keepalived服务器(在LVS01和LVS02两台服务器上配置)
+    mkdir /application/keepalived -p
+    cd /application/keepalived
+    wget http://www.keepalived.org/software/keepalived-1.1.19.tar.gz
+    ls -ld /usr/src/kernels/`uname -r`/
+    如果出现"/usr/src/kernels/2.6.32-431.el6.x86_64"说明kernel-devel-2.6.32-431.el6.x86_64软件包已经安装，如果没有出现上述结果，说明该软件包没有安装，需要执行额外
+    执行yum install kernel-devel -y，开始安装kernel-devel-2.6.32-431.el6.x86_64软件包
+    yum install kernel-devel -y
+    ln -s /usr/src/kernels/2.6.32-431.el6.x86_64 /usr/local/linux
+    tar zxf keepalived-1.1.19.tar.gz
+    cd keepalived-1.1.19
+    ./configure
+    make
+    make install
+    错误1：在执行命令make时候会出现这个错误(一般centos 6.4以上)
+    checking for openssl/ssl.h... no
+    configure: error
+    !!! openSSL is not properly installed on your system
+    !!! Can not include OpenSSL headers files
+    解决办法：
+    yum install openssl* -y
+    错误2：一般6.4有这个错误
+    check for poptGetContext in -lpopt ... no
+    configure: error: Popt libraries is required
+    uname -a
+    解决办法：
+    yum install popt* -y
+    配置规范启动
+    /bin/cp /usr/local/etc/rc.d/init.d/keepalived /etc/init.d <=生成启动脚本命令
+    /bin/cp /usr/local/etc/sysconfig/keepalived /etc/sysconfig/ #<=配置启动脚本的参数
+    mkdir /etc/keepalived -p #===>创建默认的keepalived配置文件路径
+    /bin/cp /usr/local/etc/keepalived/keepalived.conf /etc/keepalived/ #===>把keepalived.conf模板拷贝到/etc/keepalived下
+    /bin/cp /usr/local/sbin/keepalived /usr/sbin/
+    /etc/init.d/keepalived start
+    ps -ef | grep keep
+    /etc/init.d/keepalived stop
+    配置keepalived自动切换，并实现自动健康性检查。
+    #./genhash -s 192.168.100.8 -p 80 -u http://192.168.100.8/index.html
+     ff873bb2146020d8406ec84a21c2a5af
+    #./genhash -s 192.168.100.9 -p 80 -u http://192.168.100.9/index.html
+    188f5b91d80b994efae5f53165e6247d
+    vim /etc/keepalived/keepalived.conf
+! Configuration File for keepalived
+global_defs {
+   notification_email {
+     286937899@qq.com
+   }
+   notification_email_from Alexandre.Cassen@firewall.loc
+   smtp_server 192.168.100.1
+   smtp_connect_timeout 30
+   router_id LVS_DEVEL
+}
+
+vrrp_instance VI_1 {
+    state MASTER
+    interface eth0
+    virtual_router_id 51
+    priority 100
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass 1111
+    }
+    virtual_ipaddress {
+      192.168.100.240
+    }
+}
+
+virtual_server 192.168.100.240 80 {
+    delay_loop 6
+    lb_algo rr
+    lb_kind DR
+    nat_mask 255.255.255.0
+    persistence_timeout 20
+    protocol TCP
+    real_server 192.168.100.8 80 {
+        weight 1
+        TCP_CHECK {
+          connect_timeout 8
+          nb_get_retry 3
+          delay_before_retry 3
+          connect_port 80
+        }
+        HTTP_GET {
+            url {
+              path /
+              digest ff873bb2146020d8406ec84a21c2a5af
+              status_code 200
+            }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+    real_server 192.168.100.9 80 {
+        weight 1
+        TCP_CHECK {
+          connect_timeout 8
+          nb_get_retry 3
+          delay_before_retry 3
+          connect_port 80
+        }
+        HTTP_GET {
+            url {
+              path /
+              digest 188f5b91d80b994efae5f53165e6247d
+              status_code 200
+            }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+}
+        /etc/init.d/keepalived start
+        ipvsadm
+   8)LVS+Keepalived实现mysql负载均衡和高可用性
+    拓扑图
+    LVS+keepalived拓扑图.jpeg
+    服务器的配置列表
+    主机           IP地址              描述
+    LVS01          192.168.100.101    LVS主服务器
+    LVS02          192.168.100.102    LVS从服务器
+    RS01           192.168.100.8      后端的mysql数据库01
+    RS02           192.168.100.9      后端的mysql数据库02
+    业务VIP        192.168.100.240    VIP虚拟IP地址 
+    client01       192.168.100.103    客户端主机
+    一：安装和配置LVS服务器
+    1)安装LVS服务器(在LVS01和LVS02两台服务器上配置)
+    mkdir /application/lvs -p
+    cd /application/lvs
+    wget http://www.linuxvirtualserver.org/software/kernel-2.6/ipvsadm-1.26.tar.gz
+    ls -ld /usr/src/kernels/`uname -r`/
+    如果出现"/usr/src/kernels/2.6.32-431.el6.x86_64"说明kernel-devel-2.6.32-431.el6.x86_64软件包已经安装，如果没有出现上述结果，说明该软件包没有安装，需要执行额外
+    执行yum install kernel-devel -y，开始安装kernel-devel-2.6.32-431.el6.x86_64软件包
+    yum install kernel-devel -y
+    ln -s /usr/src/kernels/2.6.32-431.el6.x86_64 /usr/local/linux
+    tar zxf ipvsadm-1.26.tar.gz
+    cd ipvsadm-1.26
+    make
+    make install
+    lsmod | grep ip_vs
+    /sbin/ipvsadm或者modprobe ip_vs
+    cd ../
+    lsmod | grep ip_vs
+    如果在执行make命令时出现以下错误提示，
+    ...
+    libipvs.c:1071: error:'NLM_F_DUMP' undeclared(first use in this function)
+    ipbipvs.c 1072: error:too many arguments to function 'ipvs_nl_send_message'
+    make[1]: *** [libipvs.o] Error 1
+    make[1]: Leaving directory `/home/oldboy/tools/ipvsadm-1.2.6/libipvs`
+    make: *** [libs] Error 2
+    原因：ipvsadm1.26适用于kernel 2.6.28及之后的内核版本，不适合centos5.x 64bit环境
+    如果符合了系统环境后，同样需要先安装依赖包yum install libnl* popt* -y 因此建议还是使用ipvsadm-1.2.4，比较稳定
+    yum install libnl* popt* -y 
+    ifconfig eth0:0 192.168.100.240 netmask 255.255.255.0 up
+    route add -host 192.168.100.240 dev eth0
+    配置后的检查结果:
+    ifconfig eth0:0
+    2)手工在每个RealServer端配置VIP绑定(在RS01和RS02服务器上配置)
+    ifconfig lo:0 192.168.100.240 netmask 255.255.255.255 up
+    route add -host 192.168.100.240 dev lo
+    3)手工在每个RealServer端配置抵制ARP响应(在RS01和RS02服务器上配置)
+    echo "1" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+    echo "2" >/proc/sys/net/ipv4/conf/lo/arp_announce
+    echo "1" >/proc/sys/net/ipv4/conf/all/arp_ignore
+    echo "2" >/proc/sys/net/ipv4/conf/all/arp_announce
+    二：安装和配置keepalived服务器
+    1)安装keepalived服务器(在LVS01和LVS02两台服务器上配置)
+    mkdir /application/keepalived -p
+    cd /application/keepalived
+    wget http://www.keepalived.org/software/keepalived-1.1.19.tar.gz
+    ls -ld /usr/src/kernels/`uname -r`/
+    如果出现"/usr/src/kernels/2.6.32-431.el6.x86_64"说明kernel-devel-2.6.32-431.el6.x86_64软件包已经安装，如果没有出现上述结果，说明该软件包没有安装，需要执行额外
+    执行yum install kernel-devel -y，开始安装kernel-devel-2.6.32-431.el6.x86_64软件包
+    yum install kernel-devel -y
+    ln -s /usr/src/kernels/2.6.32-431.el6.x86_64 /usr/local/linux
+    tar zxf keepalived-1.1.19.tar.gz
+    cd keepalived-1.1.19
+    ./configure
+    make
+    make install
+    错误1：在执行命令make时候会出现这个错误(一般centos 6.4以上)
+    checking for openssl/ssl.h... no
+    configure: error
+    !!! openSSL is not properly installed on your system
+    !!! Can not include OpenSSL headers files
+    解决办法：
+    yum install openssl* -y
+    错误2：一般6.4有这个错误
+    check for poptGetContext in -lpopt ... no
+    configure: error: Popt libraries is required
+    uname -a
+    解决办法：
+    yum install popt* -y
+    配置规范启动
+    /bin/cp /usr/local/etc/rc.d/init.d/keepalived /etc/init.d <=生成启动脚本命令
+    /bin/cp /usr/local/etc/sysconfig/keepalived /etc/sysconfig/ #<=配置启动脚本的参数
+    mkdir /etc/keepalived -p #===>创建默认的keepalived配置文件路径
+    /bin/cp /usr/local/etc/keepalived/keepalived.conf /etc/keepalived/ #===>把keepalived.conf模板拷贝到/etc/keepalived下
+    /bin/cp /usr/local/sbin/keepalived /usr/sbin/
+    /etc/init.d/keepalived start
+    ps -ef | grep keep
+    /etc/init.d/keepalived stop
+    配置keepalived自动切换，并实现自动健康性检查。  
+    vim /etc/keepalived/keepalived.conf
+! Configuration File for keepalived
+global_defs {
+   notification_email {
+     286937899@qq.com
+   }
+   notification_email_from Alexandre.Cassen@firewall.loc
+   smtp_server 192.168.100.1
+   smtp_connect_timeout 30
+   router_id LVS_DEVEL
+}
+vrrp_instance VI_1 {
+    state MASTER
+    interface eth0
+    virtual_router_id 51
+    priority 100
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass 1111
+    }
+    virtual_ipaddress {
+        192.168.100.240
+    }
+}
+virtual_server 192.168.100.240 3306 {
+    delay_loop 6
+    lb_algo wlc
+    lb_kind DR
+    nat_mask 255.255.255.0
+    #persistence_timeout 0
+    protocol TCP
+    real_server 192.168.100.8 3306 {
+        weight 3
+        TCP_CHECK {
+        connect_timeout 10
+        nb_get_retry 3
+        delay_before_retry 3
+        connect_port 3306
+        }
+    }
+    real_server 192.168.100.9 3306{
+        weight 3
+        TCP_CHECK {
+        connect_timeout 10
+        nb_get_retry 3
+        delay_before_retry 3
+        connect_port 3306
+        }
+    }
+}
+    /etc/init.d/keepalived start
+    ipvsadm
+    出现如下执行结果，说明配置是成功的
+    IP Virtual Server version 1.2.1 (size=4096)
+    Prot LocalAddress:Port Scheduler Flags
+    -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+    TCP  192.168.100.240:mysql wlc
+    -> 192.168.100.8:mysql          Route   3      0          0         
+    -> 192.168.100.9:mysql          Route   3      0          0      
+    现在我们试着停掉一台MYSQL服务器后，再观察一下是否能够自动实现切换和自动实现健康检查功能
+    ipvsadm
+    IP Virtual Server version 1.2.1 (size=4096)
+    Prot LocalAddress:Port Scheduler Flags
+    -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+    TCP  192.168.100.240:mysql wlc
+    -> 192.168.100.8:mysql          Route   3      0          0 
+    以上现象说明，我们已经停掉了RS2服务器上的mysql服务，它会自动从ipvsadm表中删除相应的配置,但是它可以自动切换到RS1服务器上的mysql上，mysql数据库不间断运行
+    mysql -h192.168.100.240 -uroot -poldboy
+    mysql> SHOW DATABASES;
+    +--------------------+
+    | Database           |
+    +--------------------+
+    | information_schema |
+    | mysql              |
+    | test               |
+    | test1              |
+    +--------------------+
+4 rows in set (0.00 sec)
+
+        
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+    
+
+
+    
+
+
