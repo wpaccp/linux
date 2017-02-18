@@ -1,0 +1,303 @@
+templates.cfg
+
+define service {
+        name                   generic-load-service 
+        use                    generic-service
+        service_description    Current Load
+        check_command          check_nrpe!check_load
+        max_check_attempts     3
+        normal_check_interval  3
+        retry_check_interval   2
+        check_period           24*7
+        notification_interval  1440
+        notification_period    24*7
+        notification_options   w, c, r
+        contact_groups         test_admin
+        process_perf_data      1
+        register               0
+}
+define service {
+       name                    generic-mysql-service
+       use                     generic-service
+       max_check_attempts      2
+       normal_check_interval   1
+       retry_check_interval    1
+       check_period            24*7
+       notification_interval   10
+       notification_period     24*7
+       notification_options    w, u, c, r
+       cantact_groups          admin,oracle_admins
+       process_perf_data       1
+	    register               0
+}        	
+define service {
+	    name                    generic-mysqlslave-service
+	    use                     generic-service
+	    max_check_attempts      2
+	    normal_check_interval   1
+	    retry_check_interval    1
+	    check_period            24*7
+	    notification_interval   10
+	    notification_period     24*7
+	    notification_options    w, u, c, r
+	    contact_groups          admin,oracle_admins
+	    process_perf_data       1
+	    register                0  
+}
+define service {
+	    name                    generic-disk-service
+	    use                     generic-service
+	    service-description     Disk Partition
+	    check_command           check_nrpe!check_disk
+	    max_check_attempts      3
+	    normal_check_interval   3
+	    retry_check_interval    2
+	    check_period            24*7
+	    notification_interval   1440
+	    notification_period     diskhours
+	    notification_options    c, r
+	    contact_groups          test_admin
+	    process_perf_data       1
+	    register                0
+}
+define service {
+	    name                  generic-mem-service
+	    use                   generic-service
+	    service_description   MEM Useage
+	    check_command         check_nrpe!check_mem
+	    max_check_attempts    3
+	    normal_check_interval 2
+	    retry_check_interval  2
+	    check_period          24*7
+	    notification_interval 1440
+	    notification_period   24*7
+	    notification_options  w, c, r
+	    contact_groups        test_admins
+	    process_perf_data     1
+	    register              0
+
+}
+define service {
+	   name                  generic-load-service
+	   use                   generic-service
+	   service_description   Current Load
+	   check_command         check_nrpe!check_load
+	   max_check_attempts    3
+	   normal_check_interval 3
+	   retry_check_interval  2
+	   check_period          24*7
+	   notification_interval 1440
+	   notification_period   24*7
+	   notification_options  w, c, r
+	   contact_groups        test_admins
+	   process_perf_data     1
+	   register              0
+}
+define service {
+	     name                  generic-ping-service
+	     use                   generic-service
+	     service_description   PING
+	     check_command         check_ping!100.0,20%!500.0,60%
+	     max_check_attempts    4
+	     normal_check_interval 3
+	     retry_check_interval  2
+	     check_period          24*7
+	     notification_interval 1440
+	     notification_period   24*7
+	     notification_options  w, c, r
+	     contact_groups        test_admins
+	     process_perf_data     1
+	     register              0
+}
+define service {
+	    name                  generic-swap-service
+	    use                   generic-service
+	    service_description   Swap Useage 
+	    check_command         check_nrpe!check_swap
+	    max_check_attempts    4
+	    normal_check_interval 3
+	    retry_check_interval  3
+	    check_period          24*7
+	    notification_interval 1440
+	    notification_period   24*7
+	    notification_options  w, c, r
+	    contact_groups        test_admins
+	    process_perf_data     1
+	    register              0
+}
+define service {
+	    name                  generic-url-service
+	    use                   generic-service
+	    max_check_attempts    3
+	    normal_check_interval 2
+	    retry_check_interval  2
+	    check_period          24*7
+	    notification_interval 30
+	    notification_period   24*7
+	    notification_options  w, u, c, r
+	    contact_groups        test_admins
+	    process_perf_data     1
+	    register              0
+}
+define service {
+	    name                  generic-cmd-service
+	    use                   generic-service
+	    max_check_attempts    3
+	    normal_check_interval 2
+	    retry_check_interval  2
+	    check_period          24*7
+	    notification_interval 30
+	    notification_period   24*7
+	    notification_options  w, u, c ,r
+	    contact_groups        test_admins
+	    process_perf_data     1
+	    register              0
+}
+define service {
+	     name                  generic-port-service
+	     use                   generic-service
+	     max_check_attempts    3
+	     normal_check_interval 2
+	     retry_check_interval  2
+	     check_period          24*7
+	     notification_interval 30
+	     notification_period   24*7
+	     notification_options  w, u, c, r
+	     contact_groups        test_admins
+	     process_perf_data      1
+	     register               0  
+}
+define service {
+	    name                   generic-switch-service
+	    use                    generic-service
+	    max_check_attempts     3
+	    normal_check_interval  2
+	    retry_check_interval   2
+	    check_period           24*7
+	    notification_interval  30
+	    notification_period    24*7
+	    notification_options   w, u, c, r
+	    contact_groups         admins
+	    process_perf_data      1
+	    register               0
+}
+define service {
+	    name                   generic-iostat-service
+	    use                    generic-service
+	    service_description    Service Iostat
+	    service_command        check_nrpe!check_iostat
+	    max_check_attempts     3
+	    normal_check_interval  2
+	    retry_check_interval   2
+	    check_period           24*7
+	    notification_interval  30
+	    notification_period    24*7
+	    notification_options   w, u, c, r
+	    contact_groups         test_admins
+	    process_perf_data      1
+	    register               0
+}
+define service {
+	    name                   generic-disktest-service
+	    use                    generic-service
+	    service_command        check_nrpe!check_disk
+	    max_check_attempts     3
+	    normal_check_interval  2
+	    retry_check_interval   2
+	    check_period           24*7
+	    notification_interval  1440
+	    notification_period    diskhours
+	    notification_options   c, r
+	    contact_groups         test_admin
+	    process_perf_data      1
+	    register               0
+}
+
+timeperiod.cfg
+
+define timeperiod {
+	    timeperiod_name        diskhours
+	    alias                  Normal Work Hours
+	    monday                 09:20-23:00,03:30-04:30
+	    tuesday                09:20-23:00,03:30-04:30
+	    wednesday              09:20-23:00,03:30-04:30
+	    thursday               09:20-23:00,03:30-04:30
+	    friday                 09:20-23:00,03:30-04:30
+	    saturday               09:20-23:00,03:30-04:30
+	    sunday                 09:20-23:00,03:30-04:30
+}
+
+#!/bin/bash
+#
+HOSTPATH="/usr/local/nagios/etc/objects/service"
+>tmp.host
+exec <host.list
+i=1
+while read line
+do
+        if [ $i -eq 6 ]; then
+          echo -n "`echo $line|awk '{print $1}'`" >>tmp.host
+        else
+          echo -n "`echo $line|awk '{print $1}'`", >>tmp.host
+        fi
+        ((i++))
+done
+members=`head -1 tmp.host`
+>$HOSTPATH/url.cfg
+for SERVICENAME in load mem iostat swap disk
+do
+cat >>$HOSTPATH/$SERVICENAME.cfg<<EOF
+##################################################################
+# service DEFINITION BY WPACCP AT 20161126                       #
+#                                                                #
+##################################################################
+define service {
+	    use                   generic-$SERVICENAME-service
+	    host_name             $members
+}
+EOF
+done
+
+
+#!/bin/bash
+#
+HOSTPATH="/usr/local/nagios/etc/objects/service"
+>tmp.host
+exec <host.list
+i=1
+while read line
+do
+        if [ $i -eq 2 ]; then
+          echo -n "`echo $line|awk '{print $1}'`" >>tmp.host
+        else
+          echo -n "`echo $line|awk '{print $1}'`", >>tmp.host
+        fi
+        ((i++))
+done
+members=`head -1 tmp.host`
+for DOMAIN_URL in bbs wiki blog
+do
+cat >>$HOSTPATH/$url.cfg<<EOF
+##################################################################
+# service DEFINITION BY WPACCP AT 20161126                       #
+#                                                                #
+##################################################################
+define service {
+	    use                   generic-url-service
+	    host_name             $members
+	    check_command         check_url!-H http://DOMAIN_URL.etiantian.org
+}
+EOF
+done
+
+cat <<EOF>$HOSTPATH/$url.cfg
+##################################################################
+# service DEFINITION BY WPACCP AT 20161126                       #
+#                                                                #
+##################################################################
+define service {
+	    use                   generic-url-service
+	    host_name             $members
+	    check_command         check_url!-H http://DOMAIN_URL.etiantian.org
+}  
+EOF
