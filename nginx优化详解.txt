@@ -1,0 +1,404 @@
+                                                       nginx网站优化详解
+一：隐藏nginx服务的header和errormsg版本号信息
+隐藏nginx header里的版本号 
+第一种方法：编辑nginx.conf配置文件增加参数隐藏版本号
+在nginx配置文件nginx.conf中的http标签端内加入"server_tokens off"
+http {
+  ...
+  server_tokens off	
+}
+#/application/nginx/sbin/nginx -t
+#/application/nginx/sbin/nginx -s reload 
+注意点：该功能语句只能放在http,server,location标签中
+例子：curl -I -s 10.0.0.7 | grep Server或者 curl -I 10.0.0.7 2>/dev/null | grep Server
+第二种：通过源代码解决隐藏nginx版本号的目的(这个操作最好在安装之前就执行) 
+1：修改ngx_http_special_response.c
+cd /home/oldboy/tools/nginx-1.6.2
+cd src/http/
+vim ngx_http_special_response.c
+第29行需要修改成如下配置：
+static u_char ngx_http_error_tail[] =
+"<hr><center>Apache/center>" CRLF
+"</body>" CRLF
+"</html>" CRLF
+;
+保存配置
+vim ngx_http_header_filter_module.c
+第49-50行需要修改如下配置：
+static char ngx_http_server_string[] = "Server: Apache" CRLF;
+static char ngx_http_server_full_string[] = "Server:Apache" NGINX_VER CRLF;
+保存配置后，重新编译nginx
+cat /application/nginx/sbin/nginx -v
+/application/nginx/sbin/nginx -V
+cd .. /
+./configure --user=nginx --group=nginx --prefix=/application/nginx1.6.2 --with-http_stub_status_module --with-http_ssl_module
+pkill nginx
+make && make install
+
+二：更改掉nginx默认用户及用户组
+cd /application/nginx/conf
+grep "#user" nginx.conf
+useradd ngx -s /sbin/nologin -M
+vim nginx.conf
+修改如下内容为
+user ngx ngx;
+第二种方法，直接在nginx编译的时指定
+./configure --user=ngx --group=ngx --prefix=prefix=/application/nginx1.6.2
+--with-http_stub_status_module --with-http_ssl_module
+#ps -ef | grep ngx | grep -v grep 
+pkill php-fpm
+注意点：上述两种方法都是设置Nginx的Worker进程运行的用户，而主进程
+还是以root身份运行的
+
+第三种：将nginx的主进程跑在普通用户下的设置
+#vim /etc/default/
+修改如下选项如下
+EXPIRE=
+SHELL=/bin/bash
+保存退出
+#useradd zuma 
+#su - zuma 
+#cp -ap /application/nginx/conf .
+#cp -ap /application/nginx/logs .
+#cp -ap /application/nginx/html .
+#cd conf/
+#vim nginx.conf
+修改如下内容如下
+error_log  /home/zuma/logs/error.log notice;
+pid /home/zuma/logs/nginx_zuma.pid
+include /home/zuma/conf/extra/www.conf;
+vim /home/zuma/conf/extra/www.conf
+修改配置如下：
+server {
+	listen 8000;
+	server_name ww.etiantian.org;
+	root /home/zuma/html/www;
+	index index.html index.htm;
+	access_log /home/zuma/logs/www_access.log main;
+}
+保存退出
+#chown -R .zuma /application/nginx/logs/
+#/application/nginx/sbin/nginx -h
+#/applicaiton/nginx/sbin/nginx -c /home/zuma/conf/nginx.conf
+#killall -u root nginx
+
+三：配置nginx worker进程个数
+worker_processes 8; #worker_processes参数可设置等于CPU的个数和核数，一般设置为CPU的个数或核数，如果压力过大可设置为CPU*2的进程数
+或者 #sed -i '/worker_processes/s@2@4@' /proc/cupinfo
+#grep "phy" /proc/cupinfo  #查看CPU的核数
+#/application/nginx/sbin/nginx -t
+#/application/nginx/sbin/nginx -s reload
+
+四：根据CPU核数进行nginx进程优化
+1：不同的CPU对应配置参考如下
+  四核CPU服务器参数配置：
+  worker_cpu_affinity 0001 0010 0100 1000
+2: 八核CPU服务器参数配置
+  worker_cpu_affinity 0000001 00000010 000000100 00001000
+  00010000 001000000 01000000 1000000;
+  或者 worker_cpu_affinity 001 0010 0100 1000 0001 0010 0100 1000
+3：也可以使用#task -c 1,2,3 /etc/init.d/mysql start
+
+五：nginx 事件处理模型优化
+1：具体的配置参数如下(该参数可配可不配)
+events
+{
+  ...
+  use epoll;
+
+}
+六：调整nginx单个进程允许的客户端最大连接数
+这个值要根据具体服务器性能和程序的内存使用量来指定（一个进程启动使用的内存根据程序确定)
+events
+{
+	worker_connections 20480
+}
+<=worker_connection 也是事件模块指令，用于定义Nginx每个进程的最大连接数，默认是1024，最大客户连接数是由worker_processes和worker_connections决定，即Max_client=worker_processes*worker_connections，进程的最大连接数受Linux系统进程最大打开文件数限制，在执行操作系统命令"ulimit -HSn 65535"或
+配置相应文件后worker_connections的设置才能生效
+
+七：配置nginx每个进程最大打开文件数
+worker_rlimit_nofile 65535
+<=每个进程打开的最大文件数，科设置为系统优化后的ulimit -Hsn结果，
+
+八：优化服务器名字的HASH表大小
+http {
+  server_names_hash_bucket_size 64; 
+  server_names_hash_max_size: 512;
+}
+
+九：开启高效文件传输模式
+sendfile on;
+tcp_nopush on;
+
+十：设置连接的超时时间
+连接超时：php建议希望短链接，JAVA建议长连接
+keepalive_timeout 60;
+<=设置客户端连接保存会话的超时时间。超过这个时间服务器会关闭该连接
+tcp_nodelay on;
+<=打开tcp_nodelay,在包含了keepalive参数才有效
+client_header_timeout 15;
+<=设置客户端请求头读取超时时间，如超过这个时间，客户端还没有发送任何数据，nginx将返回"Request timeout(408)"错误
+client_body_timeout 15;
+<=设置客户端请求主体读取超时时间。如超过这个时间，客户端还没有发送任何数据,nginx将返回"Request timeout(408)"错误，该默认值为60
+send_timeout 15;
+<=指定响应客户端的超时时间，这个超时仅限于两个连接活动之间的时间，如果这个超时时间，客户端没有任何活动，nginx将会关闭连接
+
+十一：上传文件大小限制（动态应用）
+client_max_body_size 10m;
+
+十二：fastcgi调优
+fastcgi-connect_timeout 300;
+<=指定连接到后端FASTCGI的超时时间
+
+fastcgi-send_timeout 300;
+<=向Fastcgi传送请求的超时时间，这个值指已经完成两次握手后FastCGI传送请求的超时时间
+
+fastcgi_read_timeout 300;
+<=指定接受FastCGI应答的超时时间，这个值是指已经完成两次握手后接受FastCGI应答的超时时间
+
+fastcgi_buffer_size 64k
+指定读取FastCGI应答第一部分需要用多大的缓存区，这个值表示将使用1个64KB的缓存区读取应答的第一部分(应答头)，可以设置设置为fastcgi_buffers选项指定的缓存区大小
+
+fastcgi_buffers 4 64k
+<= 指定本地需要用多少和多大的缓存区来缓冲Fastcgi的应答请求，如果一个PHP脚本所产生的页面大小为256KB，那么会为其分配4个64KB的缓冲期来缓存；如果页面大小大于256KB，那么256KB部分会缓存到fastcgi_temp指定的路径中，但是这并不是好办法，因为内存中的数据处理速度要快于硬盘。一般这个值改为站点中PHP脚本所产生的页面大小的中间值，如果站点大部分脚本所产生的页面大小为256KB，那么可以把这个值设置为"16K","4 64K"等。
+
+fastcgi_busy_buffers_size 128k
+<=建议为fastcgi_buffers的两倍
+
+fastcgi_temp_file_write_size 128k
+在写入fastcgi_temp_path时将用多大的数据块，默认值是fastcgi_buffers的两倍，设置上述数值设置太小时若负载上来时可报502 Bad Gateway
+
+fastcgi_cache oldboy_nginx
+<=表示开启FastCGI缓存并为其指定一个名称。开启缓存非常有用，可以有效的降低CPU的负载，并且防止502错误的发生，但是开启缓存也可能会引起其他问题，要根据具体情况选择
+
+fastcgi_cache_valid 200 320 1h;
+<=用来指定应答代码的缓存时间，实例中的值表示将200和302应答缓存一个小时
+
+fastcgi_cache_valid 301 1d;
+<=将301应答缓存1天
+
+fastcgi_cache_valid any 1m;
+<=将其他应答缓存为1分钟
+
+fastcgi_cache_min_user 1;
+<=缓存在fastcgi_cache_path指令inactive参数值时间内最少使用次数
+十三：配置 nginx gzip 压缩功能
+优势：
+1：节省带宽，
+2：加快打开速度，提升用户体验
+缺点：
+1：消耗CPU,MEM
+分析那些资源压缩比高，占用资源少？
+1）文本文件<js,css,html,xml.shtml>
+实施，测试
+2：对应的压缩参数说明如下<以下命令功能要在http{}下配置>
+gzip on;
+<= 开启gzip压缩功能
+
+gzip_min_length 1k;
+<= 设置允许压缩的页面最小字节数，页面字节数从header头的content-length中获取，默认值是0，不管页面多大都进行压缩，建议设置成1K，如果小于1K可能会越压越大
+
+gzip_buffers 4 16k
+<=压缩缓存区大小，表示申请4个单位为16K的内存作为压缩结果流缓存，默认值是申请与原始数据大小相同的内存空间来压缩gzip压缩结果
+
+gzip_http_version 1.0;
+<=压缩版本（默认1.1，前端为squid2.5时使用1.0）用于设置识别HTTP
+协议版本，默认是1.1，目前大部分浏览器已经支持GZIP解压，使用默认即可
+
+gzip_com_level 2;
+<= 压缩比率，用来指定GZIP压缩比，1 压缩比最小，处理速度最快；9 压缩比最大，传输速度快，但处理最慢，也比较消耗CPU资源
+
+gzip_type text/plain application/x-javascript text/css application/xml
+<=用来指定压缩的类型，"text/html" 类型总是会被压缩<不同的服务器版本其压缩的类型不同>
+
+gzip_vary on
+<= vary header 支持，该选项可以让前端的缓存服务器缓存经过GZIP压缩的页面，例如用squid缓存经过nginx压缩的数据
+vary: Accept-Encoding:让前面的缓存服务器执行缓存后，不解压，不缓存后保存
+
+fastcgi和proxy_pass的区别：
+fastcgi是和动态PHP页面进行交互的接口，proxy_pass后跟网站，做反向代理
+
+十三：配置nginx expires 缓存功能
+expires的概念：是指服务器端的资源在客户端存放多久。对于像图片，CSS,JS等元素更改机会较小，特别是图片，可以将图片的设置在浏览器本地缓存的天数，
+作用：可以把大量的资源文件存放到客户端，如果超过expire设定的时间就算过期，如果时间没有过期，用户访问网站缓存内容，就不会去网站下载，直接通过客户端的浏览器缓存信息来显示
+expire 的优势：1：节省带宽，相同的资源客户端只下载一次，2：提升用户体验，浏览速度加快，因为很多图片和文件在本地浏览器上缓存了。3：减少服务器压力，服务器压力降低了支持的并发就高了。不需要太多的服务器
+缺点：1: 网站更新内容后，客户端缓存还是旧的。2：测试的时候，希望是新数据，但是总是看不多。3：广告，当有统计的代码，其执行结果就不准确
+
+1）如何解决缺点：
+1：根据业务需求设置expire过期时间，图片更改<相当于重新上传,一般可设置为1年或10年>，广告，统计，不缓存
+2：网站改版元素要改名例如js,css
+
+2）如何缓存到CDN资源怎么控制
+如何清理不健康的图片，
+1：清理源站的图片
+2：通过CDN提供的接口(api接口或WEB界面管理的)发给CDN，让它清理对应缓存
+
+Nginx的配置案例：
+根据文件扩展名进行判断，添加expires功能范例
+范例一：
+location ~.*\.(gif|jpg|jpeg|png|bmp|swf)$
+{
+  expires 3650d;
+}
+
+范例二:
+location ~.*\.(js|css)?$
+{
+  expires 30d;
+}
+
+范例三：
+location ~^/(images|javascript|js|css|flash|media|static)/ {
+   expires 360d
+}
+
+robots.txt设置可以或禁止各种搜索引擎访问的资源
+缺点：暴露目录结构
+范例四：
+给robots.txt设置过期时间；这里为robots.txt为7天并不记录404错误日志
+location ~(robots.txt) {
+         log_not_found off;
+         expires 7d;
+         break;
+}
+优化：nginx防爬虫
+#添加如下内容即可防止爬虫
+if (http_use_agent ~*"qihoobot|Baiduspider|Googlebot|Googlebot-Mobile|Googlebot-Image|Mediapartners-Goodle|Adsbot-Google|Feedfetcher-Google|Yahoo! Slurp|Yahoo! Slurp China|YoudaoBot|Sosospider|Sogouspider|Sogou web spider|MSNBot|ia_archiver|Tomato Bot")
+{
+  return 403;
+}
+禁止不同浏览器软件访问：
+if($http_user_agent ~*"Firefox|MSIE")
+{
+  
+}
+该配置可以放到主配置文件中，也可以放在虚拟主机配置文件中
+#cd /application/nginx/conf/extra/
+#vim bbs.conf
+
+十四：nginx日志优化技术
+1：配置日志切割脚本
+
+不记录不需要的日志
+对于健康检查或某些(图片,js,css)的日志，一般不需要记录，因为在统计PV时是按照页面计算。而且日志写入频繁消耗磁盘IO，降低服务性能
+案例1：
+location ~.*\.(js|jpg|JPG|jpeg|JPEG|css|bmp|gif|GIF)$ {
+  access_log off;
+}
+
+访问日志的权限设置
+案例1：加入日志目录为/app/logs,则授权方法
+chown -R root.root /app/logs
+chmod -R 700 /app/logs
+不需要在日志目录上给nginx用户读或者许可
+
+十五：nginx站点目录及文件URL访问控制
+1):如何给站点设置权限，为了保证站点服务器不会遭受木马入侵及修改文件安全的权限：
+1：站点内所有目录和文件的用户和组都应该是root
+2: 站点内所有目录权限默认是755，不能创建或复制文件到该目录
+3：站点内所有文件权限是默认是644，不能修改站点目录内的文件
+注意：网站服务的程序不能用root，网站用户可用nginx
+
+如何解决可以让合法用户传文件又不至于被黑客利用攻击的解决办法
+1）找到上传的目录，可以授权nginx可以访问，这是一个比较安全的做法
+2）所有站点目录全部给777权限，(最不安全的做法)
+3）使用chown -R nginx.nginx /data
+4）架构上解决，对业务进行分离，在比较好的网站业务架构中，把资源文件，包括用户上传的图片，福建等服务与程序服务分离了，最好把上传程序服务业分离，这样就可以从容按照前面安全的标准授权了。
+5）挂载的一个安全优化或者放到/etc/fstab文件中
+mount -o nosuid,noexec,nodev
+6）根据扩展名限制程序和文件访问
+案例1:Nginx下限制指定目录下的PHP程序被解析
+location ~^/images/.*\.(php|php5)$ {
+  deny all
+}
+location ~^/static/.*\.(php|php5)$
+{
+  deny all
+}
+location ~*^/data/(attachement|avatar)/.*\(php|php5) 
+{
+  deny all
+}
+
+location ~* \.(txt|doc)$ {
+  root /data/www/www;
+  deny all;
+}
+禁止访问指定目录下所有的文件和目录
+范例1：配置禁止访问指定的单个或多个目录
+单目录：
+location ~^/(static)/ {
+  deny all
+}
+location ~^/static {
+  deny all
+}
+多目录：
+location ~^/(static|js) {
+  deny all;
+}
+范例2：禁止访问目录并返回指定的http 状态码
+location /admin/ { return 403; }
+location /templates/ {return 403; }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
