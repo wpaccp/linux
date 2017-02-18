@@ -1,0 +1,272 @@
+                                                数据库的备份和还原操作
+mysqldump：常用于数据集较小的环境
+常用选项：
+--all-databases或-A：备份所有数据库
+--databases或-B：要备份的数据库，可以同时备份多个，使用空格分隔
+--flush-privileges：通知数据库重读授权表
+--host=host_name, -h host_name：要备份的数据库的主机名，可以基于网络备份
+--lock-all-tables, -x：请求锁定所有表之后再备份，对MyISAM，InnoDB,Aria做温备
+--single-transaction：能够对InnoDB存储引擎实现热备
+-u usename 备份的用户名
+-p password 登陆数据库的密码
+--events:备份事件调度器代码
+--routines：备份存储过程和存储函数
+--triggers：备份触发器
+--master-date={0|1|2}，0表示不记录，1表示距离为change master 语句，2表示记录为注释的change master语句
+
+备份数据库操作:
+完全备份：
+1：执行锁表操作，
+mysql -e 'SHOW MASTER STATUS'
+sql > flush tables with read lock;
+sql > flush logs;
+2:使用mysqldump命令备份数据库
+mysqldump -uroot -p --flush-logs --all-databases --master-date=1 > /root/all.sql;
+或直接使用mysqldump中的参数：--lock-all-tables
+mysqldump -uroot -p --flush-logs --all-databases --lock-all-tables --master-date=1 > /root/all.sql
+增量备份：
+1:导入jiaowu数据库，为增量备份做准备
+mysql -e 'SHOW MASTER STATUS'
+--------------------------
+mysql-bin.000004 107
+--------------------------
+mysql < /root/jiaowu.sql
+mysql -e 'SHOW MASTER STATUS'
+-------------------------
+mysql-bin.000004 4877
+-------------------------
+第一次增量备份操作
+cd /mydata/data
+cp /mysql-bin.mysql-bin.000004 /root或mysqlbinlog mysql-bin.000004 > /root/mon-increment.sql
+-------------------------------------------------------------------------------
+第二次增量备份操作
+mysql > use jiaowu;
+mysql > delete * from students where Age=31;
+mysql > SHOW MASTER STATUS;
+mkdir /backup
+cp /mydata/data/mysql-bin.000004 /root/backup或 mysqlbinlog mysql-bin.000004 > /root/backup/mon1-increment.sql
+模拟出现故障（硬盘损坏了）
+#cd /mydata/data
+#rm -rf *
+#killall mysqld
+
+数据库还原：
+第一次即时点还原
+mysql > set sql_log_bin=0;
+mysql -h192.168.2.100 -uroot -p123456 < all.sql
+mysql -h192.168.2.100 -uroot -p < mon-increment.sql 或mysqlbinlog --start-position=107 --stop-position=4877 mysql-bin.000004 | mysql jiaowu
+mysql > set sql_log_bin=1;
+mysql > SHOW DATABASES;
+
+第二次即时点还原
+mysql > set sql_log_bin=0;
+mysql -h192.168.2.100 -uroot -p123456 < mon1-increment.sql 或mysqlbinlog --start-position=4877 --stop-position=5072 mysql-bin.000004|mysql jiaowu
+mysql > set sql_log_bin=1;
+mysql > SHOW DATABASES;
+
+数据库中单张表的备份（针对于innodb 数据引擎）
+mysql > SHOW ENGINE INNODB STATUS;
+mysql > SELECT INTO OUTFILE '/tmp/tutor.txt' FROM tutors;
+mysql > CREATE TABLES tutor LIKE tutors;
+mysql > DROP TABLE tutors;
+mysql > LOAD DATA INFILE '/tmp/tutor.txt' INTO TABLE tutor;
+
+利用LVM快照备份数据库
+前提条件：
+1：数据库文件要在逻辑卷上
+2：此逻辑卷所在的卷组必须要有足够的空间使用快照卷
+3：事务日志要在同一逻辑卷上
+
+添加硬盘; 这里我们直接实现SCSI硬盘的热插拔, 首先在虚拟机中添加一块硬盘, 不重启
+
+[root@node1 ~]# ls /dev/sd*   #只有以下几块硬盘, 但是我们不重启可以让系统识别新添加的硬盘
+/dev/sda  /dev/sda1  /dev/sda2
+
+[root@node1 ~]# echo '- - -' > /sys/class/scsi_host/host0/scan 
+[root@node1 ~]# echo '- - -' > /sys/class/scsi_host/host1/scan 
+[root@node1 ~]# echo '- - -' > /sys/class/scsi_host/host2/scan 
+#fdisk /dev/sdb   #分区
+##创建逻辑卷
+[root@node1 ~]# pvcreate /dev/sdb1
+  Physical volume "/dev/sdb1" successfully created
+[root@node1 ~]# vgcreate myvg /dev/sdb1 
+  Volume group "myvg" successfully created
+[root@node1 ~]# lvcreate -n mydata -L +2G myvg
+  Logical volume "mydata" created.
+[root@node1 ~]# mkfs.ext4 /dev/mapper/myvg-mydata   #格式化
+[root@node1 ~]# mkdir /lvm_data
+[root@node1 ~]# mount /dev/mapper/myvg-mydata /lvm_data  #挂载到/lvm_data
+[root@node1 ~]# vim /etc/my.cnf    #修改mysql配置文件的datadir如下
+datadir=/lvm_data
+#cd /mydata/data
+#cp * -pvr /lvm_data/data/
+[root@node1 ~]# service mysqld restart  #重启MySQL
+将数据导入数据库中
+mysql > create database jiaowu 
+mysql -uroot -p < /root/jiaowu.sql
+mysql> SHOW DATABASES;
+mysql> USE employees;
+Database changed
+mysql> SHOW TABLES;
+
+创建快照卷并备份：  
+mysql> FLUSH TABLES WITH READ LOCK;     #锁定所有表
+Query OK, 0 rows affected (0.00 sec)
+
+[root@node1 lvm_data]# lvcreate -L 1G -n mydata-snap -p r -s /dev/mapper/myvg-mydata    #创建快照卷
+  Logical volume "mydata-snap" created.
+
+mysql> UNLOCK TABLES;  #解锁所有表
+Query OK, 0 rows affected (0.00 sec)
+
+[root@node1 lvm_data]# mkdir /lvm_snap  #创建文件夹
+[root@node1 lvm_data]# mount /dev/mapper/myvg-mydata /lvm_snap  #挂载snap
+mount: block device /dev/mapper/myvg-mydata--snap is write-protected, mounting read-only
+
+[root@node1 lvm_data]# cd /lvm_snap/
+[root@node1 lvm_snap]# ls
+employees  ibdata1  ib_logfile0  ib_logfile1  mysql  mysql-bin.000001  mysql-bin.000002  mysql-bin.000003  mysql-bin.index  test
+[root@node1 lvm_snap]# tar cf /tmp/mysqlback.tar *  #打包文件到/tmp/mysqlback.tar
+
+[root@node1 ~]# umount /lvm_snap/  #卸载snap
+[root@node1 ~]# lvremove myvg mydata-snap  #删除snap
+
+
+恢复数据
+[root@node1 lvm_snap]# rm -rf /lvm_data/*
+[root@node1 ~]# service mysqld start    #启动MySQL, 如果是编译安装的应该不能启动(需重新初始化), 如果rpm安装则会重新初始化数据库
+mysql> SHOW DATABASES;   #查看数据库, 数据丢失!
+[root@node1 ~]# cd /lvm_data/
+[root@node1 lvm_data]# rm -rf * #删除所有文件
+[root@node1 lvm_data]# tar xf /tmp/mysqlback.tar     #解压备份数据库到此文件夹 
+[root@node1 lvm_data]# ls  #查看当前的文件
+mysql> SHOW DATABASES; 
+
+
+方法二：
+mysql备份之lvm
+
+新建一个lvm磁盘，这里我建的lv为mydatalv，挂载到了/data下
+[root@localhost ~]# lvs
+  LV       VG     Attr       LSize Pool Origin Data%  Meta%  Move Log Cpy%Sync Convert                                                  
+  mydatalv mydata -wi-ao---- 1.00g   
+[root@localhost ~]# df -h
+文件系统                     容量  已用  可用 已用% 挂载点
+/dev/mapper/mydata-mydatalv  976M  2.6M  907M    1% /data
+将原数据库文件复制到/data目录下
+
+[root@localhost ~]# cp -a /var/lib/mysql /data/
+修改配置文件，将mysql数据库文件放在lvm盘中，二进制文件放在非lvm盘的/var/lib/mysql/目录下
+
+[root@ns1 ~]# vim /etc/my.cnf
+    [mysqld]
+    log_bin=/var/lib/mysql/mysql-bin
+    datadir=/data/mysql
+[root@localhost ~]# service mariadb restart
+[root@localhost ~]# ls /data/mysql
+aria_log.00000001  ibdata1      ib_logfile1  mysql-bin.000001  mysql-bin.000003  performance_schema
+aria_log_control   ib_logfile0  mysql        mysql-bin.000002  mysql-bin.index   test
+可以看到重启后数据库文件已存放在了/data/mysql目录中了
+对mysql进行锁表备份
+
+[root@localhost ~]# mysql -e 'flush tables with read lock;' 锁表
+[root@localhost ~]# mysql -e 'flush logs;'          对日志进行滚动，
+[root@localhost ~]# mysql -e 'show master status;' > /root/back.$(date +%F+%T)
+[root@localhost ~]# ls
+back.2016-07-13+10:14:29
+对lv创建快照
+
+[root@localhost ~]# lvcreate -L 1G -n mysqlback -p r -s /dev/mydata/mydatalv
+释放锁
+
+[root@localhost ~]# mysql -e 'unlock tables;'
+在别的磁盘上创建备份目录，只读挂载快照后备份至备份目录
+
+[root@localhost ~]# mkdir /myback
+[root@localhost ~]# mount -r /dev/mydata/mysqlback /mnt
+[root@localhost ~]# cp -a /mnt/mysql /myback
+修改表内容，然后删除掉数据库文件内容即/data/mysql中的内容
+
+[root@localhost ~]# mysql
+    MariaDB [hellodb]> use hellodb;
+    MariaDB [hellodb]> insert into classes (class,numofstu) values ('xxoo',39);
+[root@localhost ~]# rm -rf /data/*
+修改配置文件中二进制日志和数据库文件的位置
+
+[root@localhost ~]# vim /etc/my.cnf
+    [mysqld]
+    log_bin=/data/mysql/mysql-bin
+    datadir=/data/mysql
+利用/myback/中的内容还原
+
+[root@localhost ~]# cp -a /myback/* /data/
+[root@localhost ~]# service mariadb restart
+利用二进制日志还原快照后的操作，由下面这个文件来查看快照执行时二进制日志的位置
+
+[root@localhost ~]# cat back.2016-07-13+10\:14\:29 
+File    Position    Binlog_Do_DB    Binlog_Ignore_DB
+mysql-bin.000014        245
+将000014中245之后的操作做成sql文件，进行还原
+
+[root@localhost ~]# mysqlbinlog --start-position=245 /var/lib/mysql/mysql-bin.000014 > binlog.sql
+[root@localhost ~]# mysql < /root/binlog.sql
+查看恢复情况
+
+[root@localhost ~]# mysql
+
+mysql数据库备份三：使用Xtrabackup备份
+Xtrabackup是由percona提供的mysql数据库备份工具，据官方介绍，这也是世界上惟一一款开源的能够对innodb和xtradb数据库进行热备的工具。特点：
+备份过程快速、可靠；
+备份过程不会打断正在执行的事务；
+能够基于压缩等功能节约磁盘空间和流量；
+自动实现备份检验；
+还原速度快；
+xtrabackup实现完全备份
+我们这里使用xtrabackup的前端配置工具innobackupex来实现对数据库的完全备份
+使用innobackupex备份时, 会调用xtrabackup备份所有的InnoDB表, 复制所有关于表结构定义的相关文件(.frm)、以及MyISAM、MERGE、CSV和ARCHIVE表的相关文件, 同时还会备份触发器和数据库配置文件信息相关的文件, 
+这些文件会被保存至一个以时间命名的目录.
+
+完全备份过程
+[root@node1 ~]# mkdir /extrabackup  #创建备份目录
+[root@node1 ~]# innobackupex --user=root /extrabackup/ #备份数据
+###################提示complete表示成功*********************
+[root@node1 ~]# ls /extrabackup/  #看到备份目录
+2016-04-27_07-30-48 
+一般情况, 备份完成后, 数据不能用于恢复操作, 因为备份的数据中可能会包含尚未提交的事务或已经提交但尚未同步至数据文件中的事务。因此, 此时的数据文件仍不一致, 所以我们需要”准备”一个完全备份
+innobackupex --apply-log /extrabackup/2016-04-27_07-30-48/  #指定备份文件的目录
+
+恢复数据
+#cd /mydata/data/
+# rm -rf *   #删除数据文件
+#innobackupex --copy-back /extrabackup/2016-04-27_07-30-48/   #恢复数据, 记清使用方法
+#killall mysqld
+#chown -R mysql:mysql ./*
+#ll /data/
+#service mysqld restart
+
+增量备份
+MariaDB [(none)]> CREATE DATABASE TEST1;
+Query OK, 1 row affected (0.00 sec)
+MariaDB [(none)]> CREATE DATABASE TEST2;
+Query OK, 1 row affected (0.00 sec)
+[root@node1 ~]# innobackupex --incremental /extrabackup/ --incremental-basedir=/extrabackup/2016-04-27_07-30-48/ 
+[root@node1 ~]# ls /extrabackup/2016-04-27_07-57-22/ #查看备份文件
+
+BASEDIR指的是完全备份所在的目录，此命令执行结束后，innobackupex命令会在/extrabackup目录中创建一个新的以时间命名的目录以存放所有的增量备份数据。另外，在执行过增量备份之后再一次进行增量备份时，其--incremental-basedir应该指向上一次的增量备份所在的目录。
+需要注意的是，增量备份仅能应用于InnoDB或XtraDB表，对于MyISAM表而言，执行增量备份时其实进行的是完全备份。
+
+合并增量备份
+[root@node1 ~]# innobackupex --apply-log --redo-only /extrabackup/2016-04-27_07-30-48/
+[root@node1 ~]# innobackupex --apply-log --redo-only /extrabackup/2016-04-27_07-30-48/ --incremental-dir=/extrabackup/2016-04-27_07-57-22/
+
+恢复数据
+
+[root@node1 ~]# rm -rf /data/*   #删除数据
+[root@node1 ~]# innobackupex --copy-back /extrabackup/2016-04-27_07-30-48/     #整理增量备份之后可以直接通过全量备份还原
+[root@node1 ~]# chown -R mysql.mysql /data/
+[root@node1 ~]# ls /data/ -l
+
+
+
+
+
