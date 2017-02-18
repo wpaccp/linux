@@ -1,0 +1,284 @@
+                                  快速安装配置redis持久化服务
+    1) redis简介
+       REmote DIctionary Server(Redis)是一个基于key-value键值对的持久化数据存储系统
+       ，redis和大名鼎鼎的Memcached缓存服务很像，但是redis支持的数据存储类型更丰富
+       ，包括string(字符串),list(链表),set(集合)和zset(有序集合)等
+       这些数据类型都支持push/pop add/remove及取交集，并集和差集及更丰富的操作，而且
+       这些操作都是原子性的，数据都是缓存在内存中提供服务。和memcache不同的是，redis持久化缓存服务还会周期性的把更新的数据写入到磁盘以及把修改的操作记录追加到文件里记录下来，比memcached更有优势的是，redis还支持master-slave(主从)同步，这点很类似关系型数据库MYSQL。
+       redis的出现，再一定程度上弥补了memcached这类key-value内存缓存服务的不足，在部分场合可以对关系数据库起到很好的补充作用，redis提供了python，ruby,Erlang,PHP客户端，使用很方便。redis官方文档如下
+       http://www.redis.io/documentation
+       http://www.redis.cn/
+    2) Redis的优点
+       1：性能很高：redis能支持超过100K+每秒的读写频率
+       2：丰富的数据类型：redis支持二进制的Strings,Lists,Hashes,Sets及Ordered Sets等数据类型操作
+       3：原子：Redis的所有操作都是原子性的，同时Redis还支持对几个操作全并的原子性执行
+       4：丰富的特性：redis还支持public/subscribe,通知，key过期等等特性
+       5：redis支持异机主从复制
+       6：与memcached不同，可以持久化存储数据
+    3) Redis 的数据类型
+       Redis最为常用的数据类型主要有一下五种：
+       String
+       Hash
+       List
+       Set
+       Sorted set
+       redis数据类型图.jpg
+    4) redis的应用场景
+       传统的Mysql+memcached的网站架构遇到的问题
+       Mysql数据库实际上是适合进行海量数据存储的，加上通过Memcached将热点数据存放到内存cache里，达到加速数据访问的目的，绝大部分公司都曾经使用过这样的架构，但随着业务数据量的不断增加，和访问量的持续增长，很多问题就会暴露出来：
+       1)需要不断的对Mysql进行拆库拆表,Memcached也需不断跟着扩容，扩容和维护工作占据大量开发运维时间
+       2)Memcached与Mysql数据库一致性问题是个老大难
+       3)Memcached数据命中率低或宕机，会导致大量访问直接穿透到数据库，导致Mysql无法支撑访问
+       4)跨机房cache同步一致性问题
+       redis的最佳应用场景
+       1)redis最佳适用场景是全部数据in-memory
+       2)redis更多场景是作为memcached的替代品来使用的。
+       3)当需要除key/value之外的更多数据类型支持时，使用redis更合适
+       4)当存储的数据不能被剔除时，使用redis更合适
+       5)需要负载均衡的场景
+       6)支持持久化
+       更多的redis应用场景http://blog.nosqlfan.com/html/2235.html
+       1:使用redis bitmap进行活跃用户统计
+       http://blog.nosqlfan.com/html/3501.html
+       这里对redis数据库做下小结
+       1：提高了DB的可扩展性，只需要将新加的数据放到新加的数据库上就可以了
+       2：提高了DB的可扩展性，只影响到需要访问的shard服务器上的数据的用户
+       3: 提高了DB的可维护性，对系统的升级和配置可以按shared一个个来搞，对服务产
+       生的影响较小
+       4：小的数据库存的查询压力小，查询更快，性能更好
+       使用过程中的一些经验与教训，做个小结
+       1)要进行Master-slave配置，出现服务故障时可以支持切换
+       2)在master侧禁用数据持久化，只需要在slave上配置数据持久化
+       3)物理内存+虚拟内存不足，这个时候dump一值死机，时间久了机器挂掉，这个情况就是
+       灾难
+       4)当redis物理内存使用超过内存总容量的3/5时就会开始比较危险了，就开始做swap，内存碎片大
+       5)当达到最大内存时，会清空带有过期时间的key,即使key未到过期时间
+       6)redis与DB同步写的问题，先写DB,后写redis，因为写内存基本上没问题
+     2 redis部署环境搭建
+       主机名          IP地址              描述
+       Master          10.0.0.7            centos 6.4
+       Slave           10.0.0.8            centos 6.4
+     3 开始安装redis服务
+       在redis的官方网站(http://www.redis.io),下载最新的稳定版本redis
+       操作命令：
+       mkdir /home/oldboy/tools/ -p
+       cd /home/oldboy/tools/
+       wget -q http://download.redis.io/releases/redis-2.8.9.tar.gz
+       ls redis-2.8.9.tar.gz
+       tar zxf redis-2.8.9.tar.gz
+       cd redis-2.8.9
+       less README
+       make MALLOC=jemalloc
+       make PREFIX=/application/redis-2.8.9 install
+       ln -s /application/redis-2.8.9/ /application/redis
+       LANG=EN
+       tree /application/redis/bin/
+       命令执行完成后，会在/application/redis/bin目录下生成5个可执行文件，分别是
+       redis-server:Redis服务器的daemon启动程序
+       redis-cli:redis命令行操作工具。当然，你也可以用telnet根据其纯文本协议来操作。
+       redis-benchmark:redis性能测试工具，测试redis在你的系统及你的配置下的读写性能
+       redis-check-aof:更新日志检查
+       redis-check-dump:用于本地数据库检查
+     4 配置并启动redis服务
+       a:配置环境变量
+       操作命令：
+       echo 'PATH=/application/redis/bin/:$PATH' >>/etc/profile
+       . /etc/profile
+       tail -1 /etc/profile
+       b:查看命令帮助
+       cd -
+       redis-server --help
+       c:启动redis服务
+       操作命令：
+       mkdir /application/redis/conf
+       cd /home/oldboy/tools/redis-2.8.9
+       cp redis.conf /application/redis/conf/
+       killall redis-server
+       sysctl vm.overcommit_memory=1
+       redis-server /application/redis/conf/redis.conf &
+       lsof -i :6379
+       如果不支持sysctl vm.overcommit_memory=1会提示如下
+       关闭redis服务
+       redis-cli shutdown
+     5 通过客户端测试redis服务
+       redis-cli客户端帮助
+       redis-cli --help
+       redis-cli 
+       127.0.0.1:6379> help
+       Type: "help @<group>" to get list of commands in <group>
+             "help @<command>" for help on <command>
+             "help @<tab>" to get list of possible help topics 
+             "quit" to exit
+       127.0.0.1:6379> help get
+       127.0.0.1:6379> help set
+       127.0.0.1:6379> set no002 oldboy
+       127.0.0.1:6379> get no002
+       连接方式2
+       redis-cli -h 192.168.100.101 -p 6379 set no001 zhangsan
+       redis-cli -h 192.168.100.101 -p 6379 get no001 
+       redis-cli -h 192.168.100.101 -p 6379 del no001 
+       连接方式3
+       telnet 127.0.0.1 6379
+       set no003 jihu
+       get no003
+       redis 支持多种数据类型
+       值可以是任何种类的字符串(包括二进制数据)，例如你可以在一个键下保存一副jpeg图片
+       。图的长度不能超过1GB。
+       redis-cli set mykey "my binary safe value"
+       redis-cli get mykey
+       redis-cli set counter 1
+       redis-cli incr counter 
+       redis-cli incr counter
+       INCR命令将字符串值解析成整数，将其加一，最后将结果保存为新的字符串值，类似的命令有INCRBY,DECR,and DECRBY
+       redis-cli set user:01:passwd 001
+       redis-cli get user:01:passwd
+       1)字符串类型
+       这是最简单的Redis类型。如果你只用这种类型，Redis就是一个可以持久化的memcached服务器(注：memcahced的数据仅仅保存在内存中，服务器重启后，数据将丢失)
+       我们来玩一下字符串类型
+       redis-cli set mykey "my binary safe value"
+       redis-cli get mykey
+       'mysql binary safe value'正如你所见到的，通常SET和GET来设置和获取字符串值。
+       值可以是任何种类的字符串(包括二进制数据)，例如你可以在一个键下保存一副jepg图片
+       。值的长度不能超过1GB
+       虽然字符串是redis的基本值类型，但你仍然能通过它完成一些有趣的操作 例如：
+       原子递增
+       redis-cli set counter 100
+       redis-cli incr counter
+       redis-cli incr counter
+       redis-cli incrby counter 10
+       INCR命令将字符串值解析成整数，将其加一，最后将结果保存为新的字符串值，类似的命令有INCRBY,DECR,and DECRBY。实际上他们在内部就是同一个命令，只是看上去有点不同
+       INCR是原子操作意味着什么呢？就是说即便多个客户端对统一key发出INCR命令,也绝不会导致竞争的情况，例如如下情况永远不可能发生 [客户端1和客户端2同时读出"10"]，他们两都对其加到11，然后将心智设置为11，最终的值一定是12，read-increment-set
+        操作完成时，其他客户端不会在同一时间执行任何命令。
+        对字符串，另一个的令人感兴趣的操作是GETSET命令，形如其名：他为key设置新值并且返回原值，这有什么用户呢？例如：你的系统每当有新的用户访问时，就用INCR命令，操作一个redis key.你希望每小时对这个信息收集一次。你就可以GETSET这个key并给
+        其赋值0并读取原值
+        2)列表类型
+        要说清楚列表数据类型，最好先讲一点理论背景，在信息技术界List这个词常常被使用不当，例如"Python Lists"就名不副实(名为Linked Lists),但是他们实际上是数组(同样的数据类型在Ruby中叫数组)
+        一般意义上讲，列表就是有序元素的序列：10,20,1,2,3就是一个列表，但用数组实现的List和用Linked List实现的List，在属性方面大不相同。
+        Redis lists基于Linked Lists实现。这意味着即使在一个list中有数百万个元素，在头部和尾部添加一个元素的操作，其时间复杂度也是常数级别的，用LPUSH命令在十个元素
+        的List头部添加新的元素，和在千万元素list头部添加新元素的速度相同。
+        那么，坏消息是什么？在数组实现的list中利用索引访问元素的速度极快，而同样的操作在linked list实现的list上没有那么快
+        Redis Lists用linked list实现的原因是：对于数据库系统来说，至关重要的特性是：
+        能非常快的在很大的列表上添加元素。另一个重要因素是，正如你将要看到的：Redis lists能在常数时间取得常数长度
+
+  5：redis list入门
+        LPUSH 命令可向list的左边(头部)添加一个新的元素，而RPUSH命令可向list的右边(尾部)添加一个新的元素。最后LRANGE命令可从list中取出一定范围的元素
+        redis-cli rpush messages "Hello how are you?"
+        redis-cli rpush messages "Fine thanks,l'm having fun with redis"
+        redis-cli rpush messages "I should look into this NOSQL this ASAP"
+        redis-cli lrange messages 0 2
+        redis-cli lrange messages -2 0
+        redis-cli lrange messages -2
+        redis-cli lrange messages -2 -1
+        注意LRANGE带有两个索引，一定范围的第一个和最后一个元素。这两个索引都可以为负
+        开告知Redis从尾部开始计数，因此-1表示最后一个元素，-2表示list中的倒数第二个元素，以此类推。
+        正如你可以从上面的例子中猜到的，list可被用来实现聊天系统。还可以作为不同进程
+        间传递消息的队列。关键是，你可以每次都会原先添加的顺序访问数据。这不需要任何
+        SQL ORDER BY操作，将会非常快，也会很容易扩展到百万级别元素的规模。
+        例如在评级系统中，比如社会化信息网站 reddit.com,你可以把每个新提交的链接添加
+        到一个List，用LRANGE可简单对结果分页
+        在博客引擎实现中，你可以为每篇日志设置一个list,在该list中推入进博客评论，等等
+        向redis list压入ID而不是实际的数据，
+        在上面的例子里，我们将"对象"(此例中是简单消息)直接压入redis list,但通常不应
+        这么做，由于对象可能被多次引用：例如在一个list中维护其时间顺序，在一个集合中保持它的类别，只要有必要，它还会出现在其他list中，等等。
+        redis集合
+        redis集合是未排序的集合。其元素是二进制安全的字符串。SADD命令可以向集合添加一个新的元素。和set相关的操作也有许多，比如检测某个元素是否存在，以及实现交集，
+        并集，差集等等，一例胜千言
+        redis-cli sadd myset a
+        redis-cli sadd myset b
+        redis-cli sadd myset c
+        redis-cli smembers myset
+        help @set #查看命令的帮助信息
+        我向集合中添加了三个元素，并让redis返回所有元素。如你所见他们是无序的，现在让我们检查某个元素是否存在：
+        redis-cli sismember myset a
+        (integer) 1
+        redis-cli sismember myset d
+        (interger) 0
+        "a"是这个集合的成员,而"d"不是，结合特别适合表现对象之间的关系，例如用Re
+        dis集合可以很容易实现标签功能。
+        下面是一个简单的方案：对每个想加标签的对象，用一个标签ID集合与之关联，
+        并且对每个已经有的标签，一组对象ID与之关联
+        例如：假设我们的新闻ID 1000被加了三个标签tag 1,2,5和77，就可以设置下面
+        两个集合
+  6：为PHP安装redis客户端扩展
+     获取源码包
+     wget https://github.com/nicolasff/phpredis/archive/master.zip
+     安装
+     unzip master.zip
+     cd phpredis-master/
+     /application/php/bin/phpize
+     ./configure --with-php-config=/application/php/bin/php-config
+     make 
+     make install
+     修改php.ini设置,重启php
+     echo "extension = redis.so" >>/application/php/lib/php.ini
+     重新启动php-fpm服务
+     killall php-fpm
+     /application/php/sbin/php-fpm
+ 7：解读redis默认配置文件
+    grep -vE "#|^$" /application/redis/conf/redis.conf
+
+    1)是否以后台进程运行，默认为no
+    daemonize no
+    2)如以后台进程运行，则需指定一个pid,默认为/var/run/redis.pid
+    pidfile /var/run/redis.pid
+    port 6379
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 0
+    loglevel notice
+    logfile ""
+    ...
+  8：redis主从同步配置
+  一：两台主机分布安装好redis服务
+  二：修改从redis服务主机的redis服务的配置文件
+      vim /application/redis/conf/redis.conf
+      在REPLICATION配置部分，添加如下配置内容
+      #salveof <masterip> <masterport>
+      slaveof 10.0.0.109 6379 #这个IP地址是主服务器IP地址，端口号也是主服务器的端口
+      号
+      配置完成后，保存退出
+      重启redis服务
+      redis-server /application/redis/conf/redis.conf &
+  三：在从服务器上做监控
+      redis-cli -h localhost -p 6379 monitor
+  四：在主库上写数据进行测试
+      127.0.0.1:6379> set t1 oldboy01
+      127.0.0.1:6379> get t1
+      redis-cli -h 10.0.0.107 get t1 #远程连接到从库上执行get命令
+      redis-cli -h localhost -p 6379 info #redis的功能统计(监控redis服务器的
+      状态时会用到)
+      redis命令学习：http://redis.io/commands
+  五：redis的负载均衡
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+
+
+
+
+       
+
+
+
+
+
+
+
