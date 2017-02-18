@@ -1,0 +1,1168 @@
+                                 ARP协议
+ 1.1.1 什么是ARP协议
+      ARP协议,全称"Address Resolution Protocol",中文名是地址解析协议，使用ARP协议可实现通过IP地址获得对应主机的物理地址(MAC地址)
+      在TCP/IP的网络环境下，每个联网的主机都会被分配一个32位的IP地址，这种互联网地址是在网际范围标识之际的一种逻辑地址。为了让报文在屋里网络上传输，还必须要知道对方目
+      的主机的物理地址(MAC)才行，这样就存在把IP地址变换成物理地址的地址转换的问题。
+      我们以以台网环境为例，为了正确地向目的主机传送报文，必须把目的主机的32位IP地址转换成为目的主机48位以太网的地址(MAC地址)。这就需要在互联层有一个服务或功能将IP地址转换为相应的物理地址(MAC地址)，这个服务或者功能就是ARP协议。
+      所谓的"地址解析"，就是主机在发送帧之前将目标IP地址转换成目标MAC地址的过程，ARP协议的基本功能就是通过目标设备的IP地址，查询目标设备的MAC地址，以保证主机间互相通信的顺利进行。
+      ARP协议和DNS有点相像之处。不同点：DNS是在域名和IP之间的解析，另外，ARP协议不需要配置服务，而DNS要配置服务才行
+      ARP协议要求通信的主机双方必须是同一个物理网段(即局域网环境)！
+ 1.2 ARP协议工作原理
+ 1.3 ARP缓存表
+     在每台安装有TCP/IP协议的电脑里都有一个ARP缓存表(windows命令提示符里输入arp -a即可)，表里的IP地址与MAC地址是一一对应，例如：
+     C:\Documents and Settings\oldboy>arp -a
+     Interface:192.168.1.100 - 0*10005
+     Internet Address    Physioal Address   Type 
+     192.168.1.1         b0-48-7a-59-e3-22  dynamic
+     arp缓存是把双刃剑
+     1) 有ARP缓存可以加快ARP的解析速度(减少广播风暴)
+     2）正式有了ARP缓存表，给恶意黑客带来的攻击服务器主机的风险，这个就是著名的ARP欺骗或者ARP攻击
+ 1.1.4 为什么使用ARP协议
+     OSI模型把网络工作分为七层，彼此不直接打交道，只通过接口(layer interface).IP地址工作在第三层，MAC地址工作在第二层。当协议在发送数据包时，需要先封装第三层(IP地址)，第二层(MAC地址)的报头，但协议只知道目的节点的IP地址，不知道其MAC地址，又跨第二，三层，所以得用ARP协议服务
+     问号：ARP协议是二层协议，还是三层协议？
+ 1.1.5 ARP在生产环境产生的问题和解决办法
+     (1) ARP病毒，ARP欺骗
+     (2) 高可用服务器对切换时要考虑ARP缓存的问题。
+     (3) 路由器等设备无缝迁移时要考虑ARP缓存的问题，例如：换办公室的路由器。
+ 1.1.6 ARP欺骗原理
+      ARP攻击就是通过伪造IP地址和MAC地址对实现ARP欺骗的，如果一台主机中了ARP病毒，那么
+      他就能够在网络中产生大量的ARP通信量(它会以很快的频率进行广播)，
+      以至于使网络阻塞，攻击者只要持续不断的发出伪造的ARP响应包就能更改局域网中目标主机ARP缓存中的IP-MAC条目，造成网络中断或中间人攻击。
+      ARP攻击主要是存在于局域网网络中，局域网中若有一个感染ARP木马，则感染该ARP木马
+      的系统将会试图通过"ARP欺骗"手段截获所在网络内其他计算机的通信信息，并因此造成
+      成内网其他计算机的通信故障
+ 1.7 服务器切换ARP问题
+      当网络中一台提供服务的机器宕机后，当其他运行正常的机器添加宕机的集群的IP时，会因为客户端的ARP table cache的地址解析还是宕机的机器的MAC地址，从而导致，即使在其他运行正常的机器添加宕机的机器的IP，也会发生客户依然无法访问的情况。
+      解决办法是：当机器宕机，IP地址迁移到其他机器上时，需要通过arping命令来通知所有网络内机器清除器本地的ARP table cache,从而使得客户机访问时重新广播获取MAC地址。
+      这个在自己开发脚本实现服务器的高可用时是要必须考虑的问题之一，几乎所有的高可用软件都会考虑这个问题
+      ARP广播而进行新的地址解析
+      具体命令：
+      /sbin/arping -I eth0 -c 3 -s 10.0.0.162 10.0.0.253
+      /sbin/arping -U -I eth0 10.0.0.162
+  1.8 回顾ARP技术
+      1)什么是ARP协议，ARP协议的工作原理
+      2)工作中ARP带来的实际问题和解决，ARP欺骗的解决，迁移网关路由和高可用服务器切换的问题
+      3)局域网客户端ARP问题的防御
+
+                        LVS+Keepalived集群架构服务应用指南
+  1.1 集群简介
+  1.1.1 集群定义
+      集群是一种并行或分布式系统，该系统包括一个互联的整体计算机集合作为一中单一，统一的计算机资源使用，通过集群技术，我们可以在付出较低成本的情况下获得性能，可靠性，灵活性方面更高的提升。
+      计算机集群简称集群，是一组计算机系统，它通过一组松散集成的计算机软件和硬件连接起来，高度紧密地协调完成提供业务及计算相关的工作
+      集群，是一组相互独立的计算机，利用高速通信网络组成的一个计算机系统，每个集群节点(集群中的每台计算机)都是运行其自己进程的一个独立服务器。这些进程可以彼此通信，对网络客户机来说就像形成一个单一系统，协同起来向用户提供应用程序，系统资源，
+      和数据，并以单一系统的模式加以管理。用户客户机请求集群系统时，集群像是一个单一独立的服务器，而实际上几区是一组服务器
+  1.1.2 企业网站LVS集群架构图
+        企业网站LVS集群架构图.jpeg
+  1.1.3 企业网站haproxy/naginx集群架构图
+        企业网站haproxy naginx集群架构图.jpeg
+  1.1.4 企业网站LVS+haproxy nginx集群架构图
+        企业网站LVS+haproxy nginx集群架构图.jpeg
+  1.1.5 企业门户网站集群架构图
+        企业门户网站集群架构图.jpeg
+  1.1.6 回顾下什么是集群？
+        从宏观上，大家到限制应该理解网站集群的简单概念了吧，就是指一组相互独立的计算机，利用高速通信网络组成的一个计算机系统，每个集群节点(即集群中的每台计算机)
+        ,都是运行其自己进程的一个独立服务器。堆网络用户来讲，网站后端就是一个但一大的系统，协同起来向用户提供应用程序，系统资源和数据。并以单一系统的模式加以管理。用户客户机请求集群系统时，集群像是一个单一独立的服务器，而实际上集群是一组服务器。
+        所以打开谷歌，百度的页面看起来好简单啊，几分钟就可以制作出来的网页，其实后面有数万甚至数十万服务器集群系统工作的结果，那么，那么多的服务器维护和管理，以及相互协调工作就是读者你的工作职责了。
+  1.2   为什么要用集群
+  1.2.1 集群的基本特点
+       (1)高性能
+       一些国家重要的计算密集型应用，如：天气预报，核试验模拟等，这些工作需要计算机要有很强的运算处理能力，以全世界现有的技术，即使是大型机，其计算能力也很难胜任
+       因为计算时间可能会相当长，也许几天，甚至几年或更久。这样的复杂计算业务，一般都会使用计算机集群技术，蓝汛，京东商城，淘宝网，谷歌都不是几台大型机可以搞定的，都是成千上万台服务器组成的高性能集群，分布于不同的地点。
+       下面是一个大型计算机设备的硬件配置：
+       大型计算机设备的硬件配置.jpeg
+       假如你配一个LNMP环境，10个请求，单台服务器一定会比多个服务器集群要快
+       (2)价格有效性，整个系统实现是经济的，易支付的。
+       通常一套系统集群机构，只需要几台或数十台服务器主机即可，与动则价值上百万的专用超级计算机相比便宜了很多。在达到同样性能需求的条件下，采用计算机集群架构比采用同等运算能力的大型计算机基友更高的性价比。
+       早期的淘宝和支付宝的数据库等核心系统就是用的上百万的IBM小机服务器，后因成本太贵，以及扩展设备费用成几何级数翻倍，甚至发展到扩展瓶颈，人员维护也十分困难，
+       最终使用集群架构替换之，特别的是吧数据库系统从小机结合ORACLE数据库迁移到MYSQL开源数据库结合PC服务器上来了，不但成本下降了，扩展也容易了，维护也更容易了。
+       (3)可伸缩性(scalability)
+       当服务负载，压力增长时，系统能被扩展来满足需求，且不降低服务质量。
+       通常情况下，硬件设备若想扩展性能能力，不得不购买新的CPU和存储器设备,加不上去了，就不得不购买更高性能的服务器，就拿我们的机器来讲，可以增加的设备总是有限的，如果采用集群技术，则只需要将新的单个服务器加入现有集群架构即可，对于访问的客户来看，系统服务无论从连续性还是系能上都几乎没有变化，系统在不知不觉中完成了升级，加大了访问能力，轻松的实现了扩展，集群系统中的结点数目可以增长到几千个，乃至上万个，其伸缩性能远超过单台超级计算机。
+       (4)高可用性
+       尽管部分硬件和软件会发生故障，整个系统的服务必须是每天24小时，每星期7天可用的。
+       单一的计算机系统总会面临设备损毁的问题，例如：CPU，内存，主板，电源，硬盘等
+       等。只要一个不见坏掉整个计算机系统能够就可能宕机，无法正常提供服务，
+       集群架构技术，可以使得计算机在若干硬件设备故障发生时仍可以继续工作，这样就将系统的停机时间减少到了最小，集群系统在提高系统的可靠性的同时，也可大大减少了系统故障带来的业务损失，目前几乎100%的网站都要求7*24小时提供服务的。
+ 1.2.2 集群架构的优势
+       1)透明性
+         如果高效地使得由多个独立计算机组成的松耦合的集群系统构成一个虚拟服务器；客户端应用成熏与集群系统交互时，就像与一台高性能，高可用的服务器交互一样，客户端无需做任何修改，部分服务器的切入和切出不会中断服务器，这对用户也是透明的。
+       2)高性能
+         性能要接近线性加速，这需要设计很好的软硬件的体现结构，消除系统可能存在的瓶颈，将负载较均衡地调度到各台服务器上
+       3)高可用性
+         尽管部分硬件和软件会发生故障，整个系统的服务必须是每天24小时每星期7天
+         需要设计和实现很好的系统资源和故障的监测和处理系统，当发现一个模块失败时，
+         要这模块上提供的服务迁移到其他模块上。在理想状态下，这种迁移是即时的，自动的。
+         在硬件和软件上都要有冗余，通过检测软硬件的故障，将故障屏蔽，由存活点提供服务，可实现高可用性
+       4)可伸缩性
+         当服务负载，压力增长时，系统能被扩展来满足需求，且不降低服务质量。
+       通常情况下，硬件设备若想扩展性能能力，不得不购买新的CPU和存储器设备,加不上去了，就不得不购买更高性能的服务器，就拿我们的机器来讲，可以增加的设备总是有限的，如果采用集群技术，则只需要将新的单个服务器加入现有集群架构即可，对于访问的客户来看，系统服务无论从连续性还是系能上都几乎没有变化，系统在不知不觉中完成了升级，加大了访问能力，轻松的实现了扩展，集群系统中的结点数目可以增长到几千个，乃至上万个，其伸缩性能远超过单台超级计算机。
+       当然，用服务器集群系统实现可伸缩网络服务也存在很多挑战性的工作；
+      5)可管理性
+       整个系统可能在物理上很大，但应该容易管理。
+       要使集群系统变得易管理，就像管理一个单一映像系统一样。在理想状态下，软硬件模块的插入能做到即插即用
+      6)可编程性
+       在集群系统上，容易开发应用程序，门户网站要求这个
+ 1.3 集群的分类
+ 1.3.1 集群的常见分类
+      计算机集群架构按功能和结构可以分成以下几类：
+      1)负载均衡集群(Load balancing clusters),简称LBC或者LB
+      2)高可用性集群(High-availability(HA) clusters)简称HAC
+      3)高能新计算机集群(High-performance(HPC) clusters)简称HPC
+      4)网格计算(Grid computing)
+      提示：负载均衡集群和高可用性集群是我们互联网行业常用的集群架构模式，合适接下来内容的重点
+ 1.3.2 不同种类集群介绍
+      1)负载均衡集群(Load balancing clusters)
+      负载均衡集群为企业提供了更为实用，性价比更高的系统架构解决方案，负载均衡集群可以把很多客户集中的访问请求负载压力尽可能平均分摊在计算机集群中处理，客户访问请求负载通常包括应用程序负载和网络流量负载，这样的系统非常适合向使用同一组应用程序为大量用户提供服务，每个节点都可以承担一定的访问请求负载压力，并且可以实现访问请求在个节点之间动态分配，以实现负载均衡
+      负载均衡集群运行时，一般通过一个或者多个前端负载均衡器将客户访问请求分发到后端的一组服务器上，从而达到整个系统高性能和高可用性，这样的计算机集群有时也成为服务器群，一般高可用性集群和负载均衡集群会使用类似的技术，或同时具有高可用性与负载均衡的特点。
+      负载均衡集群的作用：
+      1)分担用户请求或数据流量(负载均衡)
+      2)保持业务连续性7*24服务(高可用性)
+      负载均衡集群典型的开源软件：LVS,Nginx,haproxy,lighttpd
+      负载均衡集群架构图
+      用EDRAW带着学生画，画完了分析一下，引出高可用性集群
+      负载均衡集群架构图.jpeg
+      (2)高可用性集群(High-availability(HA) clusters)
+      一般是指当集群中任意一个节点失效的情况下，节点上的所有任务会自动转移到其他正常的节点上，该过程并不是影响整个集群的运行。
+      提示：不同的业务会有若干秒的切换时间，db业务明显长于web业务切换时间，当集群中的一个节点系统发生故障时，运行着的集群服务会迅速做出反应，将该系统的服务分配到集群中其他正在工作的系统上运行，考虑到计算机硬件和软件的容错性，高可用性集群的主要目的是为了使集群的整个服务尽可能可用。如果高可用性集群中的主节点发生了故障，他可以完全接管主节点的身份(IP地址及其它资源)，因此，使集群系统环境对于用户来说是一致的，即不会影响用户的访问你。
+      高可用性集群使服务器系统的运行速度和响应速度尽可能快，他们经常利用在多台机器行运行的冗余节点和服务。用来相互跟踪，如果某个节点失败，他的替补者将在几秒钟或更短时间内接管他的职责。因此，对于用户而言，集群里的任意一台机器宕机，业务都不会受到影响(理论情况)
+      高可用性集群的作用：
+      当一台机器宕机后另外一台机器接管(IP资源和服务资源)
+      高可用性集群典型常用开源软件keepalived,heartbeat
+      高可用性集群图：用EDRWA带着学生画,画完后分析下，是否单点故障。综合下负载均衡集群，在分析分析
+      高可用性集群图.jpeg
+      (3)高性能计算集群(High-performance(HPC) clusters)
+      高性能计算集群，也称为并行计算。通常，高性能计算机集群涉及为集群开发的并行应用程序，以解决复杂的科学问题(天气预报，石油勘探，核反应模拟等)。高性能计算集群对外就好像一个超级计算机，这种超级计算机内部由数十至上万个独立服务器组成，并且在公共消息传递层上进行通信以运行并行应用程序。在工作中实际是吧任务切成了蛋糕，然后下发到集群节点计算，计算后返回结果，然后继续领新任务计算，如此往复
+      (4)网格计算集群(Grid computing)
+      由于很少接触到，暂时略过了
+      特别提示：在互联网网站运维中，比较常见的是负载均衡和高可用性集群
+ 1.4  常用的集群软硬件
+ 1.4.1 企业运维中常见的集群软硬件产品
+      1)互联网企业常用的开源集群软件有:LVS,haproxy,nginx,keepalived,heartbert
+      2)互联网企业常用的商业集群硬件有:F5,Netscaler,Redware,A10等，工作模式都相当于haproxy,nginx的工作模式。
+      3)集群硬件Netscaler产品图如下，相关指标大家查一下相关资料
+       硬件Netscaler产品图.jpeg
+      曾经:taobao,ganji,58,sina等公司在使用netscaler负载均衡产品
+      4)集群管件F5产品图如下：相关指标大家查下相关资料
+        集群管件F5产品图.jpeg
+  1.4.2 企业运维中集群软硬件产品如何选型
+      下面是老男孩老师的基本建议，更多的建议等讲完负载均衡内容在细分讲解
+      1):当企业业务重要，技术力量薄弱,并且希望出钱购买产品及更好的服务时，可以选择硬件负载均衡产品，如F5,Netscaler,Radware,此类公司多为传统的大型非互联网企业
+      ,如银行，证券，金融，宝马，奔驰等领域。
+      对于门户网站来说，大多会并用软件及硬件产品来分担单一产品的风险，如淘宝，腾讯，新浪，等融资了的企业会购买硬件产品，如赶集，58等网站。
+      2)中小企业互联网，由于起步阶段无利润可赚或者利润很低，希望通过使用开源免费的解决方案解决方案问题，雇佣专门的运维人员进行维护。例如：51cto.com,chinaunix.net.
+      相比较而言，商业的负载均衡产品成本高，性能好，更稳定，缺点不能二次开发，特大型网站，而开源的负载均衡软件对运维人员的运维能力要求较高，如果运维开发，优化能力强，那么开源软件负载均衡也是可以用，淘宝的前端就采用LVS开源产品，取消了原来的Netscale硬件产品，原因是硬件扩展太贵，请到了LVS项目创始人章文嵩博士，当然也离不开淘宝团队。
+ 1.5 LVS负载均衡集群介绍
+ 1.5.1 搭建负载均衡服务的需求
+     负载均衡集群提供了一种廉价，有效，透明的方法，来扩展网络设备和服务器的负载，带宽，增加吞吐量，加强网络数据处理能力，提高网络的灵活性和可用性
+     搭建负载均衡服务的需求
+     1)把单台计算机无法承受的大规模的并发访问或数据流量分担到多台节点设备上分别处理，
+     减少用户等待响应的时间，提升用户体验。
+     2)单个重负载的运算分担到多台节点设备上做并行处理，每个节点设备处理结束后，将结果
+     汇总，返回给用户，系统处理能力得到大幅度提高。
+     3)7*24的服务保证，任意一个或多个有限后面节点设备宕机，要求不能影响业务。
+     在负载均衡集群中，所有计算机节点都应该提供相同的服务，集群负载均衡器截取所有对该服务的入站请求，然后将这些请求尽可能地平均地分配在所有集群节点上。
+ 1.5.2 LVS(Linux Virtual Server)介绍
+     LVS是linux virtual server的简写，意即linux虚拟服务器，是一个虚拟的服务器集群，可以在UNIX/LINUX平台下实现负载均衡集群功能，该项目1998年5月由章文嵩博士组织成立，是中国国内最早出现的自由软件项目之一。
+     提示：直接浏览地址可能会有中文编码问题，同学们可以直接阅读整理过的中文资料文档即可
+     标题                          地址
+     LVS 项目介绍                 http://www.linuxvirtualserver.org/zh/lvs1.html
+     LVS 集群的体现结构           http://www.linuxvirtualserver.org/zh/lvs2.html
+     LVS 集群中的IP负载均衡技术   http://www.linuxvirtualserver.org/zh/lvs3.html
+     LVS 集群的负载调度           http://www.linuxvirtualserver.org/zh/lvs4.html
+ 1.5.3 IPVS(LVS)发展史
+     早在2.2内核时，IPVS就已经以内核补丁的形式出现
+     从2.4.23版本开始，IPVS软件就是合并到linux内核的常用版本的内核补丁的集合
+     从2.4.24以后IPVS已经称为linux官方标准内核的一部分
+ 1.5.4 IPVS软件工作层次图
+     IPVS软件工作层次图.jpeg
+     IPVS软件工作层次图2.jpg
+     从上图我们看出，LVS负载均衡调度技术是在linux内核中实现，因此，被称之为linux虚拟服务器(linux virtual server)。我们使用该软件配置LVS时候，不能直接配置内核中的IPVS,而需要使用IPVS的管理工具IPVSADM进行管理，当然，后文我们会讲通过Keepalived软件直接管理IPVS,并不是通过IPVSADM来管理IPVS
+     LVS:实现调度的工具IPVS,他的管理工具IPVSADM,keepalived实现管理及高可用,piranha实现调度的工具IPVS
+
+ 1.5.5 LVS体系结构与工作原理简单描述
+     LVS集群负载均衡器接受服务的所有入站客户端计算机请求，并根据调度算法决定那个集群节点应该处理回复请求，负载均衡(简称LB)有时也被称为LVS Director(简称 Director)
+     LVS集群服务器的体系结构如下图所示，一组服务器通过高速的局域网或者地理分布的广域网相互连接，在他们的前端有一个负载调度器，负载调度器能无缝将网络请求调度到真实服务器上，从而使的服务器集群的结构对客户是透明的，客户访问集群系统提供的网络服务就像访问一台高性能，高可用的服务器一样，客户程序不受服务器集群的影响不需做任何修改。系统的伸缩性通过在服务集群中透明地加入和删除一个节点来达到，通过检测节点或服务进程故障和正确地重复系统达到可用性，由于我们的负载调度技术是在linux内核中实现，我们称之为linux虚拟服务器
+ 1.5.6 LVS基本工作工程图
+     LVS基本工作过程图1：带颜色的小方块代表不同的客户端请求
+     LVS基本工作过程图1.jpeg
+     LVS基本工作过程图2：不同的客户端请求小方块经过负载均衡，通过指定的分配策略被分发到后面的机器上
+     LVS基本工作过程图2.jpeg
+     LVS负载均衡基本工作过程图3
+     LVS负载均衡基本工作过程图3.jpeg
+     LVS负载均衡基本工作过程图4
+     LVS负载均衡基本工作过程图4.jpg
+ 1.5.7 LVS相关术语命名约定
+     VIP
+     LVS相关术语命名.jpeg
+     为了方便大家探讨LVS技术，LVS社区提供一个命名的约定，内容如下表
+     名称：                       缩写：             说明
+     虚拟IP地址                    VIP           VIP为Diretor用于向客户端计算机
+     (Virtual IP Address)                        的IP地址。比如www.etiantian.org域名
+     真实IP地址                                  就要解析到VIP上提供服务
+     (Real Server IP Address)      RIP           在集群下面节点上使用的IP地址，物理
+                                                 IP地址
+     Director的IP地址
+     (Director IP Address)         DIP           Director用于连接内外网络的IP地址，
+                                                 物理网卡上的IP地址，是负载均衡器上
+                                                 的IP
+     客户端主机IP地址              CIP           客户端用户计算机请求集群服务器的IP
+     (Client IP Address)                         地址，该地址用作发送给集群的请求
+                                                 的源IP地址
+     LVS集群内部的节点称为真实服务器，也叫做集群节点，请求集群服务的计算机称为客户端计算机。
+     与计算机通常在网上交换数据包的方式相同，客户端计算机，Director和真实服务器使用
+     IP地址彼此进行通信
+     不同架构角色命名情况图如下
+     架构角色命名图.jpeg
+ 1.5.8 LVS集群的3种工作模式介绍介绍与原理讲解
+     IP虚拟服务器软件IPVS
+     在调度器的实现技术中，IP负载均衡及时是效率最高的。在已有的IP负载均衡及时中有通过网络地址转换将一组服务器构成一个高性能的，高可用的虚拟服务器，我们称之为VS/NAT技术，大多数商业化的IP负载均衡调度器产品都是使用NAT的方法，如Cisco的LocalDirector,F5,Netscaler的BIG/IP和Alteon的ACEDirector.
+     在分析VS/NAT的缺点和网络服务的非对称性的基础上，我们提出通过IP隧道实现虚拟服务器的方法VS/TUN和通过直接路由实现虚拟服务器的方法VS/DR，他们可以极大地提高系统的伸缩性。所以，IPVS软件实现了这三种负载均衡技术，他们大致原理如下(我们将在其他章节对其工作原理进行详细描述)，淘宝开源的模式FULLNAT
+     LVS的四种工作模式
+     缩写及全拼：NAT,TUN,DR,FULLNAT
+     1)NAT模型-网络地址转换<==收费站模式
+     Virtual Service via Network Address Translation(VS/NAT)
+     通过网络地址转换，调度器LB重写请求报文的目标地址，根据预设的调度算法，将请求分派给后端的真实服务器；真实服务器的响应报文处理之后，返回时必须要通过调度器，经过调度器时报文的源地址被重写，再返回给客户，完成整个负载调度过程。
+     VS NAT体系图.jpg
+     提示：VS/NAT模式，很类似公路上的收费站，来去都要经过LB负载均衡器，通过修改目的地址，端口或源端口。在后面的iptables防火墙客户我们也会降到NAT网络地址转换
+     原理描述：
+     客户端通过Virtual IP Address(虚拟服务的IP地址)访问网络时，请求的报文到达调度器LB时，调度器根据连接调度算法从一组真实服务器中选出一台服务器，将报文的目标地址
+     Virtual IP Address改写成选定服务器的地址(RIP1),请求报文的目标端口改写成选定服务器的相应端口(RS提供的服务端口)，最后将修改后的
+     报文发送给选出的服务器RS1，同时，调度器LB在连接的Hash表中记录这个链接，当这个链接的下一个报文到达时，从连接的HASH表中可以得到源选定服务器的地址和端口，进行同样的改写操作，并将报文传给原选定的服务器RS1，当来自真实服务器RS1的响应报文返回调度器时，调度器将返回报文的源地址和源端口改为Virtual IP Addres和相应的端口，然后调度器再把报文发给请求的用户。
+     原理图：
+     LVS NAT原理图.jpg
+     linux针对iptables nat 防火墙的内核优化
+     http://oldboy.blog.51cto.com/2561410/1184228
+     2)TUN模式-隧道模式
+     Vitrual Server via IP Tunneling(VS/TUN)
+     采用NAT技术时，由于请求和相应的报文都必须讲过调度器地址重写，当客户请求越来越多时，调度器的处理能力将成为瓶颈，为了解决这个问题，调度器把请求的报文通过IP隧道
+     (相对于IPIP或IPSEC)转发至真实服务器，而真实服务器将响应处理后直接返回客户端用户，这样调度器就只处理请求的入站报文，由于一般网络服务应答数据比请求报文大很多，采用VS/TUN技术后，集群系统的最大吞吐量可以提高10倍
+     VS/TUN的工作流程如下图所示：它的连接调度和管理与VS/NAT中的一样，只是它的报文转发方法不同，调度器根据各个服务器的负载情况，连接数多少，动态地选择一台服务器，
+     将原原请求的报文封装在另一个IP报文中，再将封装后的IP报文转发给选用的真实服务器；真实服务器收到报文后，先将收到的报文解封获得原来目标地址为VIP地址的报文，服务器发现VIP地址被配置在本地的IP隧道设备上(此处要人配置)，所以就处理这个请求，然后根据路由表将响应报文直接返回给客户。
+     在这里需要支持，根据缺省的TCP/IP协议栈处理，请求报文的目标地址为VIP，响应报文源地址肯定也有VIP,所以响应报文不需要做任何修改，可以直接返回
+     3)DR模式-直接路由模式
+     Virtual Server via Direct Routing(VS/DR)
+     VS/DR模式是通过改写请求报文的目标MAC地址，将请求发给真实服务器的，而真实服务器将响应后的处理结果直接返回给客户端用户，同VS/TUN技术一样，VS/DR技术科极大地提高集群系统的伸缩性。而且，这种DR模式没有IP隧道的开销，对集群中的真是服务器也没有必须支持IP隧道协议的要求，但是要求调度器LB与真实服务器RS都有一块网卡连在同一物理网段上，即必须在同一个局域网环境。
+
+     在LVS-DR配置中，Director将所有入站请求转发给集群内部节点，但集群内部的节点直接将他们的恢复发送给客户端计算机(没有通过Director回来)，如图所示：
+     DR直接路由模式工作逻辑图.jpg
+     特别提示：(VS/DR)模式是互联网使用的最多的一种模式，本章内容的下面讲解主要是基于DR模式
+     VS/DR模式的工作流程如下图所示：他的连接调度和管理与VS/NAT和VS/TUN中的一样，它的报文转发方法和前两种又有不同，DR模式将报文直接路由给目标服务器。在VS/DR模式中，
+     调度器根据各个真实服务器的负载情况，连接数多少等，动态地选择一台服务器，不修改目的IP地址和目的端口，也不封装IP报文，而是将请求的数据帧的MAC地址改为选出服务器的MAC地址，然后再将修改后的数据帧在与服务器组的局域网上发送，因为请求的数据帧的MAC地址是选出的真实服务器，所以真实服务器肯定可以收到这个改写目标MAC地址的数据帧，从中可以获得该请求的IP报文。当真实服务器发现报文的目标地址VIP是在本地的网络设备上，真实服务器处理这个报文，然后根据路由表将响应报文直接返回给客户
+     VS DR的工作流程.jpg
+     在VS/DR中，根据缺省的TCP/IP协议栈处理，请求报文的目标地址为VIP，响应报文的源地址肯定也为VIP，所以响应报文不需要做任何修改，可以直接返回客户，客户认为得到正常的服务，而不会知道是那一台服务器处理的。
+     VS/DR负载调度器跟VS/TUN一样只处于从客户到服务器的半连接中，按照半连接的TCP有限状态机进行状态迁移
+     原理图
+     LVS DR原理图2.jpg
+     4)FULLNAT模式-淘宝网最新开源的
+     1)LVS当前应用主要采用DR和NAT模式但这两种模式要求RealSERVER和LVS都在
+     同一个VLAN中，导致部署成本过高；TUNNEL模式虽然可以跨VLAN，但是Realserver上需要部署IPIP隧道模块等，网络拓扑上需要连同外网，较复杂，不易运维
+     为了解决上述问题，我们在LVS上添加了一种新的转发模式：               FULLNAT,该模式和NAT模式的区别是PacketIN时，除了做DNAT，还要做SNAT(用户IP-->内网IP),从而实现LVS-RealServer间可以跨VLAN通讯，RealServer只需要连接到内网；
+     目标：
+     FULLNAT将作为一种新工作模式(同DR/NAT/TUNNET),实现如下功能：
+     1)Packet IN时，目标IP更换为realserve ip，源IP更换为内网的LOCAL IP;
+     2)Packet OUT时，目标IP更换为CLIENT IP,原IP更换为VIP；
+     注：LOCAL IP 为一组内网IP地址；
+     FULLNAT转发模式
+     NAT实现原理
+ 1.5.9 LVS的三种模式优缺点比较
+       官方：三种负载均衡技术的优缺点归纳在下表中
+                                     VS/NAT             VS/TUN                 VS/DR
+       Real Server(节点服务器)      config dr gw       Tunneling            Nor-arp device/tie tip 
+       Server Network(网络)         private            LAN/WAN                LAN   
+
+       Server Number(节点数量)      low(10-20)         HIGH(100)              HIGH(100)
+       Real Server Gateway          load balancer      Own router(能出网)      Own router(能出网) 
+      优点                         地址与端口转换     WAN环境        性能最高
+      缺点                         瓶颈大效率低       系统需要支持隧道协议 不能跨出LAN
+      
+       LVS三种模式特点与简单优缺点：
+       NAT模式：
+       1)NAT及时将请求的报文(DNAT)和响应的报文(SNAT),通过调度器地址重写然后在转发给内部服务器，报文返回时在改写成原来的用户请求的地址。
+       2)只需要在调度器LB上配置WAN公网IP即可，调度器也要有私有LAN IP和内部RS节点通信
+       3）每台内部RS节点的网关地址，必须要配成调度器LB的私有LAN内物理网卡地址
+       (LDIP),这样才能确保数据报文返回时仍然经过调度器LB
+       4)由于请求与响应的数据报文都经过调度器LB，因此，网站访问量大时调度器LB有较大瓶颈，一般要求最多10-20台
+       5)NAT模式支持对IP及端口的转换，即用户请求10.0.0.1:80，可以通过调度器转换到RS
+       节点的10.0.0.2:8080(DR和TUN模式不具备的).
+       6)所有NAT内部RS节点只需配置私有LAN IP即可。
+       7)由于数据包来回都需要经过调度器，因此，要开启内核转发net.ipv4.ip_forward = 1
+       当然也包括iptables防火墙的forward功能(DR和TUN模式不需要)。
+
+       DR模式：
+       1)通过在调度器LB上修改数据包的目的MAC地址实现转发。注意，源IP地址仍然是CIP
+       ,目的IP地址仍然是VIP
+       2)请求的报文经过调度器，而RS响应处理后的报文无需经过调度器LB,因此，并发访问量大时使用效率很高(和NAT模式比)。
+       3)因DR模式是通过MAC地址的改写机制实现的转发，因此，所有RS节点和调度器LB只能在一个局域网LAN中(小缺点)
+       4)需要注意RS节点的VIP的绑定(lo:vip,lo1:vip)和ARP抵制问题
+       5)强调下：RS节点的默认网关不需要是调度器LB的DIP，而直接是IDC机房分配的上级路由器IP
+       (这是RS带有外网IP地址的情况)，理论讲：只要RS可以出网即可，不是必须要配置外网IP
+       6)由于DR模式的调度器仅进行目的MAC地址的改写，因此，调度器LB无法改变请求的报文的目的端口(和NAT药区别)
+       7)当前，调度器LB支持几乎所有的UNIX,LINUX系统，但目前不支持windows系统，真实服务器RS
+       节点可以是WINDOWS系统。
+       8)总的来说DR模式效率很高，但是配置比较麻烦，因此，访问量不是特别大的公司可以用haproxy
+       /nginx取代之，这符合运维的原则：简单，易用，高效。日2000W PV或并发请求1万以下都可以考虑用haproxy/nginx(LVS NAT模式)
+       9)直接对外的访问业务，例如：web服务做RS节点，RS最好用公网IP地址。如果不直接对外的业务
+       ，例如：Mysql,存储系统RS节点，最好只用内部IP地址。
+
+       TUN模式
+       1)负载均衡通过把请求的报文通过IP隧道(ipip隧道)的方式(请求的报文不经过源目的地址的改写(包括MAC),而是直接封装成另外的IP报文)
+       转发至真是服务器，而真实服务器将响应处理后直接返回给客户端，
+       2)由于真实服务器将响应处理后的报文直接返回给客户端用户，因此，最好RS有一个外网IP地址，这样效率才会更高，理论上：只要能出网即可，无需外网IP地址。
+       3)由于调度器LB只处理入站请求报文，因此，此集群系统的吞吐量可以提高10倍以上，但隧道模式也会带来一定的系统开销，TUN模式适合LAN/WAN.
+       4)TUN模式的LAN环境转发不如DR模式效率高，而且还要考虑系统对IP隧道的支持问题。
+       5)所有的RS服务器都要绑定VIP，抵制ARP，配置复杂
+       6)LAN环境一般多采用DR模式，WAN环境可以用TUN模式，但是当前在WAN环境下，请求转发更多的被haproxy/nginx/DNS调度等代理取代，因此，TUN模式在国内公司实际应用的已经很少了，跨机房应用要么拉光纤成局域网，要么DNS,底层数据还得同步。
+       7)直接对外的访问业务，例如：web服务做RS节点，最好用公网IP地址，不直接对外的业务
+       例如：MYSQL，存储系统RS节点，最好用内部IP地址
+ 1.5.10 LVS的调度算法
+       LVS的调度算法决定了如何在集群节点之间分布工作负荷
+       当Director调度器收到来自客户端计算机访问它的VIP的集群服务的入站请求时，
+       Director调度器必须决定那个集群节点应该处理请求，Director调度器可用于做出该决定的调度方法分为两个基本类别
+       固定调度方法：rr,wrr,dh,sh
+       动态调度方法：wlc,lc,lblc,lblcr,SED,NQ(后两种官方站点没提到，编译LVS,make过程可以看到rr|wrr|lc|wlc|lblc|lblcr|dh|sh|sed|nq)
+       10中调度算法见如下表格:
+       算法                         说明
+       rr    轮询调度(Round-Robin)，它将请求依次分配不同的RS节点，也就是在RS节点中均
+             摊请求，这种算法简单，但是只适合于RS节点处理性能相差不大的情况
+       wrr   加权轮询调度
+             (Weighted Round-Robin),它将依据不同RS节点的权值分配任务。权值较高的RS将优先获得任务，并且分配到的连接数将比权值较低的RS节点更多。相同权值的RS得到相同数目的连接数。
+       dh    目的地址哈希调度(Destination Hashing)以目的地址为关键字查找一个静态 
+              HASH表来获得需要的RS
+       sh    源地址哈希算法(Source Hashing)以源地址为关键字查找一个静态HASH表来获得
+             需要的RS
+       wlc   加权最小连接数调度(Weighted Least-Connection)假如各台RS的权值依次为Wi(I
+             =1..n),当前的TCP连接数依次为Ti(I=1..n),依次选取Ti/Wi为最小的RS作为下一个分配的RS.
+       lc    最小连接调度(least-Connection),    
+             IPVS表存储了所有活动的连接，把新的连接请求发送给当前连接数最小的RS
+       lblc  基于地址的最小连接数调度(Locality-Based Least-Connection)
+             将来自同一目的地址的请求分配给同一台RS节点，如果这台服务器尚未满负荷，分配给连接最小的RS，并以他为下一次分配的首先考虑
+       lblcr 基于地址代重复最小连接数调度(Locality-Based Least-Connection with
+             Replication)对于某一目的地址，对应有一个RS子集，对此地址请求，为他分配字节中连接数
+             较小服务器，将它加入到此子集并分配连接；若一定时间内，未被做任何修改，则将子集中的负载最大的节点从子删除
+       SED   最短的期望的延迟(Shortest Expected Delay scheduling SED)(SED)
+             基于wlc算法，这个必须举例来说
+             ABC三台机器分别权重123，连接数也分布是123.那么如果使用WLC算法的话，一个
+             新请求进入时他可能会分给ABC中的任意一个，使用SED算法后悔进行这样一个运算
+             A(1+1)/1
+             B(1+2)/2
+             C(1+3)/3
+             根据运算结果，把链接交给C
+       NQ    最少队列调度(Never Queue Scheduling NQ)(NQ)
+             无需队列，如果有台realserver的连接数=0就直接分配过去，不需要在进行SED运算。
+ 1.5.11 LVS 的调度算法的生产环境选型
+          (1)一般的网络服务，如HTTP,MAIL，MYSQL等，常用的LVS调度算法为：
+           a:基本轮叫调度rr算法
+           b:加权最小连接调度wlc
+           c:加权轮叫调度wrr算法
+          (2)基于局部性的最少连接LBLC和代复制的基于局部性最少连接LBLCR主要适用于
+          WEB Cache和DB Cache集群，但是我们很少这样用，一致性哈希
+          (3)源地址散列调度SH和目标地址散列调度DH可以结合使用在防火墙集群中，他们
+          可以保证整个系统的唯一出入口
+          (4)最短预期延时调度SED和不排队调度NQ主要是对处理时间相对比较长的网络服务
+          实际使用中，这些算法的适用范围不限于这些，我们最好参考内核中的连接调度算法的实现原理，根据具体业务需求合理的选型
+ 1.5.11 LVS 集群的特点
+        LVS集群的特点可以归纳如下：
+        (1)功能：
+        实现三种IP负载均衡及时和10种连接调度算法的IPVS软件。在IPVS内部实现上，采用高效的HASH函数和垃圾回收机制，能正确处理所调度报文相关的ICMP消息(有些商品化的系统反而不能)，虚拟服务的设置数目没有限制，每个虚拟服务有自己的服务器集，他支持持久化的虚拟服务(HTTPCookie和HTTPS等需要该功能的支持)，并提供详尽的统计数据，如连接的处理速率和报文的流量等。针对大规模拒绝服务
+        (Deny of Service)攻击，实现了三种防卫策略：有基于内容请求分发的应用层软件
+        KTCPVS，它也是在linux内核中实现。有相关的集群管理软件对资源进行监测，能及时将故障屏蔽，实现系统的高可用性，主，从调度器能周期性地进行状态同步，从而实现更高的可用性。
+        (2)适用性
+         (1)后端真是服务器可运行任何支持TCP/IP的操作系统，包括linux，各种UNIX(如)
+         FreeBSD,Sun Solaris,HP Unix等)，MAC/OS和windowsNT/2000等。
+         (2)负载调度器LB能够支持绝大多数的TCP和UDP协议：
+         协议                       内容
+         TCP    HTTP,FTP,PROXY,SMTP,POP3,IMAP4,DNS,LDAP,HTTPS,SSMTP等
+         UDP    DNS,NTP,ICP,视频，音频流播放器等
+         无需对客户机和服务器做任何修改，可适用于大多数internet服务。
+         (3)调度器本事当前不支持windows系统。支持大多数的linux和UNIX系统
+        (3)性能
+           LVS服务器集群系统具有良好的伸缩性，可支持几百万个并发连接。配置100M网卡
+           采用VS/TUN或VS/DR调度技术，集群系统的吞吐量可达1Gbits/s；如果是千兆网卡
+           则系统的最大吞吐量可接近10Gbits/s
+        (4)可靠性
+           LVS服务器集群软件已经在很多大型的，关键性的站点得到很好的应用，所有它的可靠性在真实应用得到很好的证实
+        (5)软件许可证
+           LVS集群软件是按GPL(GNU Public License)许可证发行的自有软件，这意味着你可以得到软件的源代码，有权对其进行修改，但必须保证你的修改也是以GPL方式进行
+ 1.5.13 LVS的官方中文阅读资料
+        提示：可能会有中文编码问题，同学们可以直接阅读整理的中文资料文档即可
+        标题                          地址
+        LVS 项目介绍                 http://www.linuxvirtualserver.org/zh/lvs1.html
+        LVS 集群的体现结构           http://www.linuxvirtualserver.org/zh/lvs2.html
+        LVS 集群中的IP负载均衡技术   http://www.linuxvirtualserver.org/zh/lvs3.html
+        LVS 集群的负载调度           http://www.linuxvirtualserver.org/zh/lvs4.html
+ 1.7 安装LVS软件
+ 1.7.1 安装LVS准备
+ 1.7.1.1 需要3台服务器或VM虚拟机
+       1)数据库及memcache等对内业务的负载均衡环境
+       管理IP地址         角色               备注
+       10.0.0.7         LVS01调度器         对外提供服务的VIP为10.0.0.29
+       10.0.0.8         web01(真实服务器)
+       10.0.0.9         web02(真实服务器)
+       特别提示：上面的环境为内部环境的负载均衡模式，即LVS服务是对内部业务的，如数据库或memcache
+       2)web服务或web cache等负载均衡环境
+       外部IP地址     内部IP地址     角色                        备注
+       192.168.1.19   10.0.0.19    LVS调度器(Director)  对外提供服务的VIP为10.0.0.29
+       192.168.1.17   10.0.0.18    RS1(真实服务器)               主机名
+       192.168.1.18   10.0.0.17    RS2(真实服务器)
+       提示这个表格一般是提供web或web cache负载均衡的情况，此种情况特点为双网卡环境
+       ，这里把10.0.0.0/24假设为内网卡，192.168.1.0/24假设为外网卡。
+       3)为什么选192.168.1.0/24为外网卡而不是10.0.0.0/24
+        这是因为我们测试时笔记本或台式机的IP是192.168.1.0/24段，把台式机当作客户端测试更方便，所以，台式机应该能访问到负载均衡的VIP
+ 1.7.1.2 配好简单的HTTP服务
+       我们这里APACHE服务为例，通过yum install httpd -y方式安装好httpd服务。
+       分布在10.0.0.178和10.0.0.179,RS服务器上做如下操作
+       yum install httpd -y
+ 1.7.2 开始安装LVS
+     以下的安装都是在LVS LB 192.168.1.180上
+     1)下载相关的软件包
+     wget http://www.linuxvirtualserver.org/software/kernel-2.6/ipvsadm-1.2.4.tar.gz
+     #<=适合5.X
+     wget http://www.linuxvirtualserver.org/software/kernel-2.6/ipvsadm-1.2.6.tar.gz
+     #<=适合6.X
+     2)安装准备命令
+     lsmod | grep ip_vs
+     cat /etc/redhat-release
+     uname -rm
+     ls -ld /usr/src/kernels/`uname -r`/
+     ln -s /usr/src/kernels/2.6.32-431.el6.x86_64 /usr/local/linux
+     ll /usr/src/
+     提示：如果没有/usr/src/kernel/26.32-431.el6.x86_64路径，很可能是缺少kernel-devel-2.6.32-431.el6.x86_64的软件包，通过yum install kernel-devel -y
+     3)ln这个命令也可以不执行，直接指定内核参数编译见附录。
+     4)libipvs.c 1072:warning:passing argument 2 of 'ipvs_nl_send_message' from incompatible pointer t...
+     make[1]: *** [libipvs.o] Error 1
+     make[2]: Leaving director `/home/tools/ipvsadm-1.26bipvs`
+     make[3]: ***[libs] Error 2
+     解决办法：ln内核路径到/usr/src/linux,5.x不能使用ipvs1.26
+     建议重新安装ipvs1.24
+     安装LVS命令：
+     cd /home/oldboy/tools
+     wget http://www.linuxvirtualserver.org/software/kernel-2.6/ipvsadm-1.26.tar.gz
+     tar zxf ipvsadm-1.26.tar.gz
+     cd ipvsadm-1.26
+     make
+     make install
+     lsmod | grep ip_vs
+     /sbin/ipvsadm或者modprobe ip_vs
+     cd ../
+     lsmod | grep ip_vs
+     故障1：如果在执行make命令后，出现如下错误现象：
+     ....
+     libipvs.c:1071: error:'NLM_F_DUMP' undeclared(first use in this function)
+     ipbipvs.c 1072: error:too many arguments to function 'ipvs_nl_send_message'
+     make[1]: *** [libipvs.o] Error 1
+     make[1]: Leaving directory `/home/oldboy/tools/ipvsadm-1.2.6/libipvs`
+     make: *** [libs] Error 2
+     原因：ipvsadm1.26适用于kernel 2.6.28及之后的内核版本，不适合centos5.x 64bit环境
+     如果符合了系统环境后，同样需要先安装依赖包yum install libnl* popt* -y 因此建议还是使用ipvsadm-1.2.4，比较稳定
+     LVS安装小结：
+     1)Centos5.X安装LVS,使用1.24版本。不用1.26.
+     2)Centos6.4安装LVS,使用1.26版本。并且需要先安装yum install libnl* popt* -y
+     3)安装LVS，要执行ipvsadm把ip_vs模块加载到内核
+ 1.8 手动配置LVS负载均衡服务
+ 1.8.1手动添加LVS转发
+     1)用户访问www.etiantian.org 然后被DNS解析到VIP 10.0.0.29,这个步骤是在DNS里配置的
+     2)如果是自建的DNS，etiantian域的DNS记录设置如下
+     www IN A 10.0.0.29
+     如果未自建DNS，需要在购买DNS域名商提供的DNS管理界面增加类似上面的DNS记录一条，
+     这里的IP地址一定是外网地址，才能正式使用，我们假设192.168.1.0/24端为外网端
+     修改结构类似下图(必须做真正环境才能做下面修改)：
+     DNS配置图.jpeg
+     2)配置LVS虚拟IP(VIP)一共有3种方法，选择一种方法即可
+     #ifconfig eth0:0 10.0.0.10/24 up ==>简便写法
+     ifconfig eth0:0 192.168.100.240 netmask 255.255.255.0 up
+     #ifconfig eth0:0 10.0.0.10 netmask 255.255.255.0 up ==>别名写法
+     特别提示：很多朋友在部署时用了如下命令(其实是不必要的)：
+     #route add -host 10.0.0.10 dev eth0 ==>添加主机路由，也可不加此行
+     route add -host 192.168.100.240 dev eth0
+     3)配置后的检查结果:
+     ifconfig eth0:0
+     4)手工执行配置添加LVS服务并增加两台RS
+     ipvsadm --help 
+     ipvsadm -C #清空所有配置
+     ipvsadm --set 30 5 60 #也可以不配置这一项
+     #ipvsadm -A -t 10.0.0.10:80 -s rr -p 20
+     ipvsadm -A -t 192.168.100.240:80 -s rr -p 20
+     ipvsadm -L -n
+     #ipvsadm -a -t 10.0.0.10:80 -r 10.0.0.8:80 -g -w 1
+     #ipvsadm -a -t 10.0.0.10:80 -r 10.0.0.9:80 -g -w 1
+     ipvsadm -a -t 192.168.100.240:80 -r 192.168.100.8:80 -g -w 1
+     ipvsadm -a -t 192.168.100.240:80 -r 192.168.100.9:80 -g -w 1
+     删除方法
+     ipvsadm -D -t 10.0.0.10:80 -s rr
+     ipvsadm -d -t 10.0.0.10:80 -r 10.0.0.8
+ 1.8.2 手工在每个RealServer端配置VIP绑定
+     每台real server端执行以下命令,一共有3种方法，选择一种方法即可
+     #ifconfig lo:0 10.0.0.10/32 up
+     #ifconfig lo:0 10.0.0.10 netmask 255.255.255.255 up
+     ifconfig lo:0 192.168.100.240 netmask 255.255.255.255 up
+     #route add -host 10.0.0.10 dev lo
+     route add -host 192.168.100.240 dev lo
+     每个集群节点上的环回接口(lo)设备上被绑定VIP地址(其广播地址是其本身，子网掩码是
+     255.255.255.255，采用可变长掩码方式把网段划分成只含一个主机地址的目的地址，避免IP地址冲突)
+     允许LVS-DR集群中的集群节点接受发向该VIP地址的数据包，这会是一个非常严重的问题，集群内部的真实服务器将尝试回复来自正在请求VIP客户端的ARP广播，这样所有的真实服务器都将声称自己拥有该VIP地址，这时客户端将有可能接受发送请求数据包的某台真实服务器上，从而破坏了DR集群的负载均衡策略，因此，必须要抵制所有真实服务器响应目标地址为VIP的ARP广播，而把客户端ARP广播的响应交给负载均衡调度器
+ 1.8.3 手工在每个RealServer端配置抵制ARP响应
+     抵制ARP响应方法如下
+     echo "1" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+     echo "2" >/proc/sys/net/ipv4/conf/lo/arp_announce
+     echo "1" >/proc/sys/net/ipv4/conf/all/arp_ignore
+     echo "2" >/proc/sys/net/ipv4/conf/all/arp_announce
+     watch -n 1 ipvsadm -L -n
+ 1.8.4 arp抑制技术参数说明
+     中文说明
+     arg_ignore-INTEGER
+     定义对目标地址为本地IP的ARP询问不同的应答模式
+     0-(默认值):回应任何网络接口上对任何本地IP地址的ARP查询请求
+     1-只回答目标IP地址是来访问网络接口本地地址的ARP查询请求
+     2-只回答目标IP地址是来访问网络接口本地地址的ARP查询请求，且来访IP必须在该网络
+     接口的子网段内
+     3-不回应该网络界面的ARP请求，而只对设置的唯一和连接地址做出回应
+     4-7 保留未使用
+     8-不回应所有(本地地址)的ARP查询
+     arp_announce-INTEGER
+     对网络接口上，本地IP地址的发出的，ARP回应，做出相应级别的限制：
+     确定不同程度的限制，宣布对来自本地源IP地址发出ARP请求的接口
+     0-(默认)在任意网络接口(eth0,eth1,lo)上的任何本地地址
+     1-尽量避免不在该网络接口子网段的本地地址做出ARP回应，当发起ARP请求的源IP地址是
+     被设置应该经由路由达到此网络接口的时候很有用，此时会检查来访IP是否为所有接口上
+     的子网端内IP之一，如果该来访IP不属于各个网络接口上的子网段内，那么将采用级别2
+     的方式来进行处理
+     2-对查询目标使用最适合的本地地址，在此模式下将忽略这个IP数据包的源地址并尝试
+     选择能与该地址通信的本地地址，首要是选择所有的网络接口的子网中外出访问子网中
+     包含该目标IP地址的本地地址，如果没有合适的地址被发现，将选择当前的发送网络接口或其他的有可能接受到该ARP回应的网络接口来进行发送限制了使用本地的VIP地址作为优先的网络接口
+ 1.8.5 检查手工添加LVS转发成果
+     测试LVS服务的转发：
+     首先在客户端浏览器访问RS http://10.0.0.8及RS http://10.0.0.9确认是否RS端正常
+     然后访问DR的VIP http://10.0.0.10,如果经过多次测试能分别出现www.etiantian.org
+     提示：由于有浏览器缓存及LVS默认会话保持等的影响，个人简单的测试切换RS的几率
+     要很多次并且间隔一定时间访问才行，尽可能要关闭浏览器换不同的客户端IP来测试，
+     效果更明显一些，用单机测试是有这种情况(负载均衡的算法倾向于一个客户端IP定向到
+     一个后端服务器，以保持会话连贯性)，如果用两三台机器去测试也需就不一样
+     在访问的同时可以用命令查看状态信息
+     ipvsadm -L -n --stats
+     ipvsadm -L -n --stats --sort
+     ipvsadm -L -n --stats --sort --thresholds
+ 1.9 使用脚本配置LVS负载均衡服务
+ 1.9.1 配置LVS负载均衡器端手工操作步骤
+     命令执行过程及检查配置的执行结果
+     ipvsadm -C #清空所有配置
+     ipvsadm --set 30 5 60 #也可以不配置这一项
+     ipvsadm -A -t 10.0.0.10:80 -s rr -p 20
+     ipvsadm -a -t 10.0.0.10:80 -r 10.0.0.8:80 -g -w 1
+     ipvsadm -a -t 10.0.0.10:80 -r 10.0.0.9:80 -g -w 1
+     ipvsadm -L -n --sort
+ 1.9.2 开发脚本配置LVS负载均衡器端
+     cd /server/scripts
+     vim ipvs_server.sh
+     #!/bin/bash
+     . /etc/init.d/functions
+     VIP=192.168.100.240
+     PORT=80
+     RIP=(
+     192.168.100.8
+     192.168.100.9
+     )
+     start(){
+     ifconfig eth0:0 $VIP netmask 255.255.255.0 up
+     route add -host $VIP dev eth0
+     ipvsadm -C
+     ipvsadm --set 30 5 60 
+     ipvsadm -A -t $VIP:$PORT -s rr -p 20
+     for ((i=0;i<${#RIP[*]};i++))
+     do
+     ipvsadm -a -t $VIP:$PORT -r ${RIP[$i]} -g -w 1
+     #ipvsadm -a -t $VIP:$PORT -r 10.0.0.8:80 -g -w 1
+     #ipvsadm -a -t $VIP:$PORT -r 10.0.0.9:80 -g -w 1
+     done
+     }
+     stop(){
+         ipvsadm -C
+         ifconfig eth0:0 down
+         route del -host $VIP dev eth0
+     }
+     case "$1" in
+         start)
+           start
+           echo "ipvs is start"
+           ;;
+           stop)
+           echo "ipvs is stopped"
+           stop
+           ;;
+           restart)
+           echo "ipvs is restart"
+           stop
+           start
+           ;;
+           *)
+           echo "USAGE:$0 {start|stop|restart}"
+      esac
+      mv ipvs_server.sh /usr/local/sbin/ipvs
+      cd /usr/local/sbin
+      chmod +x ipvs
+      cd -
+      ipvs stop
+ 1.9.3 开发脚本配置LVS RS真实服务器端
+       #!/bin/bash
+       # Written by wpaccp (286937899@qq.com)
+       # QQ:286937899
+       # description: Config realserver lo and apply noarp
+       VIP=(
+            192.168.100.240
+       )
+       interface="lo:0"
+       start(){
+               echo "start LVS of REALServer IP"
+               for ((i=0;i<${#VIP[*]};i++))
+               do
+                  #interface="lo:`echo ${VIP[$i]}|awk -F . '{print $4}'`"
+                  /sbin/ifconfig $interface ${VIP[$i]} broadcast ${VIP[$i]} netmask 255.255.255.255 up
+                  route add -host ${VIP[$i]} dev $interface
+               done
+               echo "1" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+               echo "2" >/proc/sys/net/ipv4/conf/lo/arp_announce
+               echo "1" >/proc/sys/net/ipv4/conf/all/arp_ignore
+               echo "2" >/proc/sys/net/ipv4/conf/all/arp_announce
+
+       }
+       stop(){
+              echo "start LVS of REALServer IP"
+              for ((i=0;i<${#VIP[*]};i++))
+              do
+                 #interface="lo:`echo ${VIP[$i]}|awk -F . '{print $4}'`"
+                 /sbin/ifconfig $interface ${VIP[$i]} broadcast ${VIP[$i]} netmask 255.255.255.255 down
+                 route del -host ${VIP[$i]} dev $interface
+              done
+              if [ ${#VIP[*]} -eq 1 ]; then
+                echo "0" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+                echo "0" >/proc/sys/net/ipv4/conf/lo/arp_announce
+                echo "0" >/proc/sys/net/ipv4/conf/all/arp_ignore
+                echo "0" >/proc/sys/net/ipv4/conf/all/arp_announce
+              fi
+             }
+        case "$1" in
+          start)
+                start
+                ;;
+          stop)
+                stop
+                ;;
+          *)
+               echo "Usage: $0 {start|stop}"
+               exit 1
+        esac
+  1.9.3 开发脚本对LVS RS进行健康检查
+  vim check_lvs.sh 
+
+#!/bin/bash
+#
+ VIP=192.168.100.240 #VIP地址
+ CPORT=80 #realserver端口
+ FAIL_BACK=127.0.0.1 #失败返回的IP地址
+ RS=("192.168.100.8" "192.168.100.9") #realserver的IP地址
+ declare -a RSSTATUS #realserver的状态
+ RW=("2" "1")
+ RPORT=80
+ TYPE=g
+ CHKLOOP=3
+ LOG=/var/log/ipvsmonitor.log
+ addrs(){
+          ipvsadm -a -t $VIP:$CPORT -r $1:$RPORT -$TYPE -w $2
+          [ $? -eq 0 ] && return 0 || return 1
+ }
+ delrs(){
+          ipvsadm -d -t $VIP:$CPORT -r $1:$RPORT
+          [ $? -eq 0 ] && return 0 || return 1
+ }
+ checkrs(){
+          local I=1
+          while [ $I -le $CHKLOOP ]; do
+            if `curl http://$1 >/dev/null 2>&1` &> /dev/null; then
+              return 0
+            fi
+            let I++
+          done
+          return 1
+}
+initstatus(){
+            local I
+            local COUNT=0;
+            for I in ${RS[*]}; do
+              if ipvsadm -L -n | grep "$I:$RPORT" &> /dev/null ; then
+                RSSTATUS[$COUNT]=1
+              else
+                RSSTATUS[$COUNT]=0
+              fi
+              let COUNT++
+             done
+ }
+        initstatus
+        while true; do
+          let COUNT=0
+          for I in ${RS[*]}; do
+            if checkrs $I; then
+              if [ ${RSSTATUS[$COUNT]} -eq 0 ]; then
+                 addrs $I ${RW[$COUNT]}
+                 [ $? -eq 0 ] && RSSTATUS[$COUNT]=1 && echo "`date +'%F %H:%M:%S'`, $I is back." >> $LOG
+              fi
+            else
+              if [ ${RSSTATUS[$COUNT]} -eq 1 ]; then
+                 delrs $I
+                 [ $? -eq 0 ] && RSSTATUS[$COUNT]=0 && echo "`date +'%F %H:%M:%S'`, $I is gone." >> $LOG
+              fi
+           fi
+
+            let COUNT++
+          done
+          sleep 5
+        done
+  1.9.4 常见的LVS负载均衡高可用性解决方案
+        1)通过开发上面的脚本来解决，如果负载均衡器硬件坏了，几分钟或秒级别内可以再其他备机上完成新的部署，如果做的细的，还可以写脚本来做调度去之间的切换和接管功能，早期的办法，还是比较笨重的，目前已不能再推荐使用
+        2)heartbeat+lvs+ldirectord脚本配置方案，这个方案同学自己可以去搜索，这个方案中beartbeat负载VIP的切换以及资源的启动停止，ldrectord负责RS节点的健康检查，由于比较复杂，不易控制，属于早期的解决方案，现在很少使用
+        3)通过RedHat提供的工具piranha里配置LVS
+        piranha是RedHat提供的一个基于WEB的LVS配置软件，可以省去手工配置LVS的繁琐工作，同时，也可以单独提供cluster功能，例如，可以通过piranha 激活Director Server
+        的后备主机，也就是配置DirectorServer的双机热备功能，不过不推荐大家弄
+        4)keepalived+LVS方案，这是老男孩极力推荐的当前最优方案，因为这个方案符合简单
+        ，易用，高效的运维原则，也是接下来重点讲解的负载均衡及高可用解决方案（重点内容）
+        5)其他：
+         http://bbs.linuxtone.org/thread-1402-1-1.html
+         ...
+   1.9.5 LVS集群分发请求RS不均衡生产环境实战解决
+       生产环境中ipvsadm -L -n发现两台RS的负载不均衡，一台由很多请求，一台没有，并且
+       没有请求的那台RS经测试服务正常，lo:VIP也有，但是就是没有请求
+       TCP 172.16.1.50:3307 wrr persistent 10
+         ->172.16.1.51:3307        Route  1      0      0
+         ->172.16.1.52:3307        Route  1      8      12758
+       问题原因
+       persistent 10的原因，persistent会话保持，当clientA访问网站的时候，LVS把
+       请求发给52，那么以后ClientA再点击的其他操作其他请求，也会发送该52这台机器。
+       解决办法：
+       到keepalived中注释掉persistent 10然后/etc/init.d/keepalived reload，然后可以
+       看到以后负载均衡两边都请求都均衡了。
+       其他导致负载不均衡的原因可能有：
+       1)LVS自身的会话保持参数设置(-p 300,persistent 300).优化：大公司尽量用cookies
+       替代session
+       2)LVS调度算法设置，例如：rr,wrr,wlc,lc
+       3)后端RS节点的会话保存参数，例如：apache的keepalived参数
+       4)访问量较少的情况，不均衡的现象更加明显
+       5)用户发送的请求时间长短，和请求资源多少大小
+  1.9.8 LVS故障排错理论及实战讲解
+        排错的大思路：要熟悉LVS的工作原理过程，然后根据原理过程来排错，例如
+        1)调度器上LVS调度规则及IP的正确性
+        2)RS节点上VIP绑定ARP抑制的检查
+        生产处理思路
+        1)把绑定的VIP做实时监控，出问题报警或者自动处理后报警
+        2)把绑定的VIP做成配置文件，例如：vim /etc/sysconfig/network-scripts/lo:0
+        ARP抑制的配置思路
+        1)如果是单个VIP，那么可以用STOP传参设置0
+        2)如果RS端有多个VIP绑定，有此时，即使是停止VIP绑定也一定不要置0.
+            if [ ${#VIP[@]} -le 1 ]; then
+              echo "0" >/proc/sys/net/ipv4/config/lo/arp_ignore
+              echo "0" >/proc/sys/net/ipv4/config/lo/arp_announce
+              echo "0" >/proc/sys/net/ipv4/config/all/arp_ignore
+              echo "0" >/proc/sys/net/ipv4/config/all/arp_announce
+        3)RS节点上自身提供服务的检查(DR不能端口转换)
+        4)辅助排除工具tcpdump，ping等
+        5)负载均衡和反向代理集群的三角形排查理论
+   1.1.10 keepalived高可用集群介绍
+        keepalived起初是转为LVS设计的，专门用来监控LVS集群系统中的各个服务节点的状态，后来又加入了VRRP的功能，因此除了配合LVS服务外，也可以作为其他服务的高可用软件，VRRP是Virtual Router Redundancy Protocol(虚拟路由器冗余协议)的缩写，VRRP出现的目的就是为了解决静态路由出现的单点故障问题，它能够保证网络的不间断，稳定的运行，所以,keepalived一方面具有LVS cluster nodes healthchecks功能，另一方面也具有LVS directors failover功能
+   1.10.2 keepalived服务两大用途：healthcheck & failover
+   1.10.2.1 LVS directors failover功能
+          ha hailover 功能：实现LB Master主机和Backup主机之间故障转移的自动切换
+          这是针对有两个负载均衡器director同时工作而采取的故障转移措施，当主负载
+          均衡
+          ha hailover 功能：LB Master主机和Backup主机之间故障转移和目标切换
+          这是针对于两个负载均衡器director同时工作而采取的故障转移措施，当主负载均衡器(MASTER)失效或出现故障时，备份负载均衡器(BACKUP)将自动接管主负载均衡器的所有工作(vip资源及相应服务)；一旦主负载均衡器(Master)故障修复，MASTER又会接管回它原来处理的工作，而备份负载均衡器(BACKUP
+          )会释放MASTER失效时它接管的工作，此时两者将恢复到最初各自的角色状态。
+  1.10.2.2 LVS directors failover功能原理图
+           图一：keepalived集群正常工作双主架构简图
+  1.10.2.3 LVS cluster nodes healthchecks功能
+           rs healthcheck功能：负载均衡定期检查RS的可用性决定是否给其分发请求
+           当虚拟服务器中的某一个甚至是几个真实服务器同时法僧故障无法提供服务时，负载均衡器会自动将丢失的RS服务器从转发对列种清除出去，从而保证用户的访问不受影响；
+           当故障的RS服务器被修复以后，系统又会自动地把他们加入转发队列，分发请求提供正常服务， 
+  1.10.3 keepalived故障切换转移原理介绍
+         KeepalivedDirectors之间的故障切换转移，是通过VRRP协议(VirtualRoter Redundancy Protocol 中文虚拟路由器冗余协议)来实现
+         在keepalivedDirectors正常工作时，主Director节点会不断的想备节点广播心跳消息，
+         用以告诉备节点自己还活着，当主节点发生故障时，备节点就会无法继续检测到主节点的心跳，进而调用自身的接管程序，接管主节点的IP资源及服务，而当主节点恢复故障时，
+         备节点会释放主节点故障时自身接管的IP资源和服务，恢复到原来的自身的备用角色。
+         那么，什么是VRRP协议呢？
+  1.10.4 VRRP协议简单介绍
+         VRRP协议，全称Virtual Router Redundancy Protocol,中文名，虚拟路由器冗余协议，VRRP的出现就是为了解决静态路由的单点故障，VRRP是通过一种精选协议机制来讲路由任务交给某台VRRP路由器。
+         MASTER和BACKUP
+         在一个VRRP虚拟路由器中，有多台物理的VRRP路由器，但是这多台物理的机器并不同时工作，而是一台称为MASTER的负责路由工作，其他的都是BACKUP，MASTER并非一成不变，VRRP协议让每个VRRP路由器参与竞选，最终获胜的就是MASTER，MASTER有一些特权，比如拥有虚拟路由器的IP地址，我们的主机就是用这个IP地址作为静态路由的，拥有特权的MASTER要负责转发发送给网关地址的包和响应ARP请求
+         VRRP通过竞选协议来实现虚拟路由器的功能，所有的协议报文都是通过IP多播包(224.0.0.18)形式来发送的。虚拟路由器由VRID(范围0-255)和一组IP地址组成，对外表现为一个周知的MAC地址：00-00-5E-00-01-{VRID},所以
+         ，在一个虚拟路由器中，不管谁有MASTER，对外都是相同的MAC和IP(称之为VIP),
+         客户端主机并不是需要因为MASTER的改变而修改自己的路由配置，对我们来说，这种主从的切换是透明的。
+         在一个虚拟路由器中，只有作为MASTER的VRRP路由器会一直发送VRRP广告包(VRRP Advertisement message).BACKUP不会抢占MASTER除非它的优先级更高，当MASTER不可用时(BACKUP收不到广告包)，多台BACKUP中优先级最高的这台会被强占MASTER。这种抢占是非常快速(<1s)，以保证服务的连续性。
+         出于安全性考虑，VRRP包使用了加密协议进行加密
+         小结：
+         1)VRRP协议，全称Virtual Router Redundancy Protocol,中文名，虚拟路由器冗余协议，VRRP的出现就是为了解决静态路由的单点故障，
+         2)VRRP是通过一种竞选协议机制来讲路由任务交给某台VRRP路由器。
+         3)VRRP通信是通过IP多播的方式实现通信
+         4)在通信时，主节点发包，备节点收包，备节点如果不能接受到主节点发送的包时，
+         会接管主节点的资源，备节点可能有多个，可通过优先级竞选。
+         5)VRRP使用了加密协议
+         6)Keepalived最多支持20个实例
+   1.10.5 Keepalived服务高可用实战
+          1：keepalived单实例配置
+          1)安装LVS,安装keepalived(ip:10.0.0.7)
+          ifconfig eth0:0 down
+          keepalived.conf文件配置如下
+          ! Configuration File for keepalived
+          global_defs {
+                 notification_email {
+                 49000448@qq.com
+          } 
+          notification_email_from Alexandre.Cassen@firewall.loc
+          smtp_server 10.0.0.1
+          smtp_connect_timeout 30
+          router_id LVS_7
+          }
+          vrrp_instance VI_1 {
+              state MASTER
+              interface eth0
+              virtual_router_id 55
+              priority 150
+              advert_int 1
+          authentication {
+              auth_type PASS
+              auth_pass 1111
+          }
+          virtual_ipaddress {
+                10.0.0.10/24
+          }
+      } 
+          2)安装keepalived(10.0.0.8)
+          keepalived.conf文件配置如下
+          ! Configuration File for keepalived
+          global_defs {
+                 notification_email {
+                 49000448@qq.com
+          } 
+          notification_email_from Alexandre.Cassen@firewall.loc
+          smtp_server 10.0.0.1
+          smtp_connect_timeout 30
+          router_id LVS_7
+          }
+          vrrp_instance VI_1 {
+              state MASTER
+              interface eth0
+              virtual_router_id 55
+              priority 150
+              advert_int 1
+          authentication {
+              auth_type PASS
+              auth_pass 1111
+          }
+          virtual_ipaddress {
+                10.0.0.10/24
+          }
+      } 
+      2：Keepalived多实例配置
+         第一个keepalived服务器上的配置(ip:10.0.0.7)
+         ! Configuration File for keepalived
+
+         global_defs {
+            notification_email {
+            49000448@qq.com
+         }
+         notification_email_from Alexandre.Cassen@firewall.loc
+         smtp_server 10.0.0.1
+         smtp_connect_timeout 30
+         router_id LVS_1
+         }
+
+         vrrp_instance VI_1 {
+             state MASTER
+             interface eth0
+             virtual_router_id 51
+             priority 150
+             advert_int 1
+         authentication {
+             auth_type PA   SS
+             auth_pass 1111
+         }
+         virtual_ipaddress {
+             10.0.0.10/24
+         }
+      }
+         vrrp_instance VI_2 {
+             state BACKUP
+             interface eth0
+             virtual_router_id 52
+             priority 50
+             advert_int 1
+         authentication {
+             auth_type PASS
+             auth_pass 1111
+         }
+         virtual_ipaddress {
+             10.0.0.5/24
+         }
+      }
+   第二个keepalived服务器上的配置(ip:10.0.0.8)
+   ! Configuration File for keepalived
+
+     global_defs {
+        notification_email {
+        49000448@qq.com
+     }
+     notification_email_from Alexandre.Cassen@firewall.loc
+     smtp_server 10.0.0.1
+     smtp_connect_timeout 30
+     router_id LVS_2
+     }
+
+     vrrp_instance VI_1 {
+         state BACKUP
+         interface eth0
+         virtual_router_id 51
+         priority 100
+         advert_int 1
+         authentication {
+             auth_type PASS
+             auth_pass 1111
+         }
+         virtual_ipaddress {
+             10.0.0.10/24
+         }
+      }
+
+      vrrp_instance VI_2 {
+          state MASTER
+          interface eth0
+          virtual_router_id 52
+          priority 150
+          advert_int 1
+      authentication {
+          auth_type PASS
+          auth_pass 1111
+      }
+      virtual_ipaddress {
+          10.0.0.10/24
+       
+      }
+    }
+      ip add|egrep "0.10|0.5"
+1.10.6 通过keepalived服务实现http服务的高可用实战演示
+       主机名       ip地址          备注        
+       web01        10.0.0.7       keepalived服务，nginx服务
+       web02        10.0.0.9       keepalived服务，nginx服务
+       准备：
+       1)把www.etiantian.org域名解析到VIP上，例如：10.0.0.29
+       2)两台服务器配好，并且保持数据一致的。
+       3)默认情况下keepalived软件仅仅在对方机器宕机的时候才会接管业务，当然我们可以自己写守护进程来处理当业务有问题就接管，例如：
+       cd /server/scripts
+       vim check_http.sh
+
+       #!/bin/sh
+       while true
+         do
+           if [ `nmap 127.0.0.1 -p 80 | grpe open | wc -l` -ne 1 ]; then
+             /etc/init.d/keepalived stop
+           fi
+         sleep 10
+        done 
+       sh check_http.sh &
+1.10.7 通过keepalived 服务实现mysql服务的高可用实战演示
+1.10.8 keepalvied的日志查看
+       tail -f /var/log/messages
+1.10.9 配置指定文件接收keepalived服务日志
+       vim /etc/sysconfig/keepalived
+       在/etc/sysconfig/keepalived文件中
+       注释掉KEEPALIVED_OPTIONS="-D"
+       并在该文件中配置如下内容
+       KEEPALIVED_OPTIONS="-D -d -S 0"
+       vim /etc/rsyslog.conf添加如下内容
+       local2.debug /var/log/sudo.log
+       local0.*     /var/log/keepalived.log
+       保存后退出
+       /etc/init.d/rsyslog restart
+       /etc/init.d/keepalived restart
+ 1.10.10 LVS+Keepalived介绍
+ 1.10.10.1 LVS介绍
+        LVS(Linux Virtual Server)是一个虚拟的服务器集群系统，可以在Unix/Linux平台
+        下实现负载均衡集群功能。LVS有三种IP负载均衡模式(VS/NAT,VS/DR和VS/TUN);
+        八种调度算法(rr,wrr,lc,wlc,lblc,lblcr,dh,sh),具体内容见附录二，本篇主要介绍LVS负载均衡的(VS/DR)模式，有关VS/DR负载均衡模式的工作原理请见附录四
+        在LVS服务器上的配置(ip:10.0.0.7)
+        对keepalived.conf配置文件添加如下内容
+        ! Configuration File for keepalived
+
+         global_defs {
+            notification_email {
+            49000448@qq.com
+         }
+         notification_email_from Alexandre.Cassen@firewall.loc
+         smtp_server 10.0.0.1
+         smtp_connect_timeout 30
+         router_id LVS_1
+         }
+
+         vrrp_instance VI_1 {
+             state MASTER
+             interface eth0
+             virtual_router_id 51
+             priority 150
+             advert_int 1
+         authentication {
+             auth_type PASS
+             auth_pass 1111
+         }
+         virtual_ipaddress {
+             10.0.0.10/24
+         }
+      }
+
+      virtual_server 10.0.0.10 80 {
+            delay_loop 6
+            lb_algo wrr
+            lb_kind DR
+            nat_mask 255.255.255.0
+            persistence_timeout 300
+            protocol TCP
+      }
+      #ipvsadm -A -t 10.0.0.10:80 -s -wrr -p 20
+      real_server 10.0.0.8 80 {
+          weight 1
+          TCP_CHECK {
+          connect_timeout 8
+          nb_get_retry 3
+          delay_before_retry 3
+          connect_port 80
+          }
+      }
+      real_server 10.0.0.9 80 {
+          weight 1
+          TCP_CHECK {
+          connect_timeout 8
+          nb_get_retry 3
+          delay_before_retry 3
+          connect_port 80
+          }
+      }
+      #ipvsadm -a -t 10.0.0.10:80 -r 10.0.0.8:80 -g -w 1
+      #ipvsadm -a -t 10.0.0.10:80 -r 10.0.0.9:80 -g -w 1
+      在后端的web01和web02上的配置
+      手工在每个RealServer端配置VIP绑定
+      每台real server端执行以下命令,一共有3种方法，选择一种方法即可
+      ifconfig lo:0 10.0.0.10/32 up
+      ifconfig lo:0 10.0.0.10 netmask 255.255.255.255 up
+      route add -host 10.0.0.10 dev lo
+      抵制ARP响应方法如下
+      echo "1" >/proc/sys/net/ipv4/conf/lo/arp_ignore
+      echo "2" >/proc/sys/net/ipv4/conf/lo/arp_announce
+      echo "1" >/proc/sys/net/ipv4/conf/all/arp_ignore
+      echo "2" >/proc/sys/net/ipv4/conf/all/arp_announce
+      watch -n 1 ipvsadm -L -n
+      ipvsadm -Lnc 
+      ipvsadm -Ln --stats --rate
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+          
+
+          
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+     
+
+
+     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+     
+
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      
+
+
+
+
+
+
+
+
