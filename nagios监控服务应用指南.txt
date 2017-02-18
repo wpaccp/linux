@@ -1,0 +1,1718 @@
+                                    nagios监控服务应用指南
+     nagios监控服务应用指南
+       小区：视频监控，保安，进门有没有车拦截的，告诉探头车速
+     企业工作中为什么要部署监控系统？
+         在企业网络架构里，监控系统就相当于哨兵的作用，监控系统非常重要。
+         监控系统都需要监控：
+         1）本地资源：负载uptime,cpu(top,sar),磁盘(df -hi),内存(free,swap),IO(iostat),RADIO级别,CPU温度，passwd文件的变化，本地所有文件指纹识别
+         2）网络服务：端口，URL,丢包，进程数，IDC网络流量。
+         3）其他设备：路由器，交换机端口流量，监控光衰，打印机，WINDOWS等。
+         4）业务数据：用户登录失败次数，用户登录网站次数，输入验证码失败的次数，某个API接口流量并发，电商网站订单，支付交易的数量
+         5）监控软件本身仅仅是一个平台，我们想监控的内容，理论上只要在服务器命令行可以获取到就可以被监控软件监控
+    前言 nagios监控工具介绍以及原理
+    nagios(难够死)监控工具介绍与优势
+       nagios是一款开源的网络及服务的监控工具，其功能强大，灵活性强，能有效监控windows,linux,和uninx等系统的主机各种状态信息，交换机，路由器等网络设备，主机端口及URL服务等，根据不同业务故障级别
+       发出告警信息(邮件,微信,短信,语音报警,飞信,MSN)给管理员，当故障恢复时也会发出恢复消息给管理员
+       nagios服务端可以在linux系统和类unix系统上运行，目前无法在windows上运行(客户端软件)，windows可以作为被监控的主机，但是不能被作为监控服务器
+       官方网站地址:http://www.nagios.org/
+       官方快速安装说明：http://nagios.sourceforge.net/doc/3_0/quickstart-fedora.html
+       nagios的特点
+       1)监控网络服务(SMTP,POP3,HTTP,TCP,PING等)；
+       2)监控主机资源(CPU,负载,IO状态,虚拟及正式内存，磁盘利用率等)；
+       3)简单地插件设计模式使得用户可以方便定制符合自己的服务的检测方法；
+       4)并行服务检查机制；
+       5)具备定义网络分层结构的能力，用"parent"主机定义来表达网络主机间的关系，这种关系可被用来发现和明晰主机宕机或不可达状态；
+       6)当服务或主机问题产生与解决后将告警发送给联系人(mail/im/sms/sound/语音)；
+       7)具备定义事件句柄功能，它可以在主机或服务的事件发生时获取更多问题定位；
+       8)自动的日志回滚
+       9)可以支持并实现对主机的冗余监控(支持分布式监控)
+       10)可选的WEB界面用于查看当前的网络状态，通知和故障历史，日志文件等
+     Nagios 监控系统家族成员的构成：
+       nagios监控一般由一个主程序(nagios),一个插件程序(nagios-plugins)和一些可选的附件程序(NRPE,NSClient,NSCA,NDOUtils)等
+       nagios本身是一个监控平台而已，其具体的监控工作都是通过(nagios-plugins,也可以自己编写)来实现
+       的，因此,nagios主程序和nagios-plugins插件都是nagios服务端必须要安装的程序组件，nagios-plugins一般也要安装于被监控端，几个附加程序的描述如下：
+       1：NRPE:半被动模式
+          存在位置：NRPE软件工作于被监控端，操作系统为linux/unix系统。
+          NRPE作用：用于在被监控端的远程linux/unix主机上执行脚本插件获取数据回传给服务器端，
+          以实现对这些主机资源的监控。
+          存在形式：守护进程(ageng)模式，开启端口为5666
+       2：NSClient++:半被动模式
+          存在位置：用于被监控端为windows系统的服务器
+          作用：功能相当于linux下的NRPE
+          用于监控windows主机时，安装在windows主机上的组件
+       3：NDOUtils(不推荐使用)
+          存在位置：NDOUtils工作于nagios服务器端
+          作用：用于将nagios的配置信息和个event产生的数据存入数据库以实现对这些数据的检索和处理。
+       4: NSCA:纯被动模式的监控
+          位置：NSCA需要同时安装在nagios的服务器端的客户端(被监控端)
+          作用：用于让被监控的远程linux/unix主机主动将监控到的信息发送给nagios服务器(在分布式监控集群
+          模式中要用到，300台服务器内，可以不用)。
+          http://library.nagios.com/library/products/nagioscore/manuals/
+          http://sourceforge.net/projects/nscplus/
+          分布式监控NSCA外部构件简介：为完成从远程主机主动提交强制检测结果，于是就开发了NSCA外部构件，该外部构件，该外部构件包含两部分，第一部分是客户端程序，运行于远程主机上并负责将强制检测结果送到指定的nagios服务端，另一部分NSCA守护进程(NSCA),它既可以独立第运行于守护服务也可以注册到inetd里作为一个inetd客户程序来提供监听连接。从客户端收到服务检测结果信息之后，守护进程将结果提交给在中心服务器的nagios，方式是通过在外部命令文件里插入一条PROCESS_SVC_CHECK_RESULT命令，之后跟上检测结果，在nagios服务端下一次处理外部命令时将会找到这条由分布式服务器送来的强制检测信息并处理它
+          nagios 监控系统及家族成员(外部构件)的简单原理
+          1)NPRE运行原理图
+           NRPE运行原理图.jpeg
+           相当于领导分配工作，下属做完，中间，回报工作
+          2)NSClient++运行原理图
+            NSClient++运行原理图.jpeg
+          3)NDOUtils 运行原理图
+            NDOUtils运行原理图.jpeg
+          4)NSCA分布式监控运行原理图(大规模集群，500台)
+            NSCA分布式监控运行原理图.jpeg
+        5:nagios 监控工具综合系统简单原理图
+          nagios 监控工具原理简图.jpeg
+          思想：化简为繁是一个优秀的运维工程师必须要掌握的一个重要技术思想
+        6:nagios监控工具原理简图(2)
+          nagios监控工具原理简图(2).jpeg
+          下面这张原理图符合生产运维的原则：简单，易用，高效。
+       第一部分:Nagios服务端安装
+       (本例nagiosserver的ip为10.0.0.19 Centos5.8 2.6.18-308 x86_64)
+       1.1 nagios 准备部分
+       1.1.1 准备3台服务器或VM虚拟机
+       1) nagios服务器及客户端服务器
+       管理IP地址        角色              备注
+       10.0.0.7        nagios监控服务器  
+       10.0.0.8        LAMP服务器        被监控的客户端服务器
+       10.0.0.9        LAMP服务器        被监控的客户端服务器
+       1.1.2 设置yum安装源
+       [设置yum源目的]
+       默认情况执行yum会从国外的站点下载，速度慢
+       换成国内的提供yum源的站点，这样以后yum安装软件时更快，yum是一个非常方便的rpm软件包安装命令，一般安装基础的软件会用到。命令：yum install 软件包名字或关键字] -y
+       [设置yum源方法]
+       方法一：首先上传Centos-Base.repo.oldboy到linux上，并修改yum源
+       wget -O /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-6.repo
+       设置字符集
+       echo 'export LC_ALL=C' >>/etc/profile
+       source /etc/profile
+       关闭iptables防火墙功能,和SElinux
+       /etc/init.d/iptables stop
+       chkconfig iptables off
+       getenforce 
+       setenforce 0
+       sed -i 's#SELINUX=enforcing#SELINUX=disabled#g' /etc/selinux/config
+       时间同步
+       /usr/sbin/ntpdate pool.ntp.org
+       echo '#time sync by oldboy at 2017-1-10'>>/var/spool/cron/root
+       echo '*/10 * * * * /usr/sbin/ntpdate pool.ntp.org'>/dev/null 2>&1>>/var/spool/cron/root
+       crontab -l
+       安装GCC库和LAMP平台
+       yum install gcc glibc glibc-common -y
+       yum install gd gd-devel -y #出图时要使用的软件，如果不出图，有可能是该软件安装有问题
+       yum install httpd php php-gd -y
+       yum install mysql* -y #如果不安装数据库，就没有创建数据库的插件
+       创建nagios用户和nagios组
+       /usr/sbin/useradd -m nagios
+       /usr/sbin/groupadd nagcmd
+       /usr/sbin/useradd apache #如果是编译安装LAMP，需要创建该用户，yum安装就不需要创建了
+       /usr/sbin/usermod -a -G nagcmd nagios
+       /usr/sbin/usermod -a -G nagcmd apache
+       安装naigos
+       mkdir /home/oldboy/tools
+       cd /home/oldboy/tools
+       rz -y #将oldboy_training_nagios_soft.zip上传到/home/oldboy/tools
+       ls -lsh
+       unzip oldboy_training_nagios_soft.zip
+       tar xzf nagios-3.5.1.tar.gz
+       cd nagios
+       ./configure --with-command-group=nagcmd
+       make all
+       make install
+       make install-init
+       make install-config
+       make install-commandmode
+       make install-webconf
+       配置web的认证
+       htpasswd -cb /usr/local/nagios/etc/htpasswd.users oldboy 123456
+       安装nagios-plugins监控插件
+       cd ../
+       yum install -y perl-devel
+       tar zxf nagios-plugins-1.4.16.tar.gz
+       ./configure --with-nagios-user=nagios --with-nagios-group=nagios --enable-perl-modules
+       make && make install
+       cd ../
+       ls /usr/local/nagios/libexec/|wc -l
+       安装nrpe
+       tar zxvf nrpe-2.12.tar.gz
+       cd nrpe-2.12
+       ./configure
+       make all
+       make install-plugin
+       make daemon
+       make daemon-config
+       安装nrpe插件
+       tar zxvf nrpe-2.12.tar.gz
+       cd nrpe-2.12
+       ./configure
+       make all
+       make install-plugin
+       make install-daemon
+       make install-daemon-config
+       cd ..
+       启动nagios服务并检查
+       /etc/init.d/nagios start
+       /etc/init.d/httpd start
+       lsof -i tcp:80
+       ps -ef | grep nagios #ngios主进程是没有端口的。
+       通过客户端浏览器访问nagios主程序和主页面
+       http://10.0.0.17/nagios
+       安装时候出现的错误
+       1：如果出现错误页面403，说明php没有安装或没有装好。
+       解决办法：yum install php -y
+       2：如果出现错误页面404，说明在安装nagios时没有执行make install-webconf
+       解决办法：make install-webconf 或者重新安装一下nagios主程序
+       第二部分：nagios客户端的安装
+       (本例子nagiosclient的IP为10.0.0.18,10.0.0.17,centos5.8 2.6.18-308 x86_64)
+       和nagios服务端相比，nagios客户端不需要安装如下内容
+       1:nagios无需安装LAMP平台环境
+       2:nagios客户端无需安装nagios服务端软件包
+       3:nagios客户端需要多安装如下软件包:
+       Class-Accessor-0.31.tar.gz
+       Config-Tiny-2.12.tar.gz
+       Math-Calc-Units-1.07.tar.gz
+       Params-Validate-0.91.tar.gz
+       Regexp-Common-2010010201.tar.gz
+       check_iostat
+       check_memory.pl
+       nrpe-2.12.tar.gz
+       4:nagios客户端总共需要安装的软件有：
+       yum install gcc glibc glibc-common -y
+       yum install mysql* -y
+       Class-Accessor-0.31.tar.gz
+       Config-Tiny-2.12.tar.gz
+       Math-Calc-Units-1.07.tar.gz
+       Params-Validate-0.91.tar.gz
+       Regexp-Common-2010010201.tar.gz
+       check_iostat
+       check_memory.pl
+       nrpe-2.12.tar.gz
+       5:安装nagios客户端
+       hostname client01
+       一：首先上传Centos-Base.repo.oldboy到linux上，并修改yum源
+       wget -O /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-6.repo
+       设置字符集
+       echo 'export LC_ALL=C' >>/etc/profile
+       source /etc/profile
+       二：关闭iptables防火墙功能,和SElinux
+       /etc/init.d/iptables stop
+       chkconfig iptables off
+       getenforce 
+       setenforce 0
+       sed -i 's#SELINUX=enforcing#SELINUX=disabled#g' /etc/selinux/config
+       三：时间同步
+       /usr/sbin/ntpdate pool.ntp.org
+       echo '#time sync by oldboy at 2017-1-10'>>/var/spool/cron/root
+       echo '*/10 * * * * /usr/sbin/ntpdate pool.ntp.org'>/dev/null 2>&1>>/var/spool/cron/root
+       crontab -l
+       四：添加nagios用户
+       /usr/sbin/useradd -m nagios -s /sbin/nologin 
+       mkdir /home/oldboy/tools/
+       cd /home/oldboy/tools/
+       rz -y #将oldboy_training_nagios_soft.zip上传到/home/oldboy/tools
+       unzip oldboy_training_nagios_soft.zip
+       五：安装nagios插件
+       yum install -y perl-devel
+       tar zxf nagios-plugins-1.4.16.tar.gz
+       ./configure --prefix=/usr/local/nagios --enable-perl-modules --enable-redhat-pthread-workaround
+       make && make install
+       cd ../
+       ls /usr/local/nagios/libexec/|wc -l
+       六：安装nrpe
+       tar zxvf nrpe-2.12.tar.gz
+       cd nrpe-2.12
+       ./configure
+       make all
+       make install-plugin
+       make install-daemon
+       make install-daemon-config
+       cd ..
+
+       插件安装：
+       echo "------ step 4: install soft for iostat------"
+       cd /home/oldboy/tools/
+       tar zxvf Params-Validate-0.91.tar.gz 
+       cd Params-Validate-0.91 perl Makefile.PL 
+       make  
+       make install    
+       cd .. 
+       #---------------------------------------- 
+       cd /home/oldboy/tools/
+       tar zxvf Class-Accessor-0.31.tar.gz
+       cd Class-Accessor-0.31
+       perl Makefile.PL
+       make
+       make install
+       cd ..
+       #---------------------------------------- 
+       cd /home/oldboy/tools/
+       tar zxvf Config-Tiny-2.12.tar.gz
+       cd Config-Tiny-2.12
+       perl Makefile.PL  
+       make
+       make install
+       cd ..
+       #---------------------------------------- 
+       cd /home/oldboy/tools/
+       tar zxvf Math-Calc-Units-1.07.tar.gz
+       cd Math-Calc-Units-1.07
+       perl Makefile.PL
+       make
+       make install
+       cd ..
+       #---------------------------------------- 
+       cd /home/oldboy/tools/
+       tar zxvf Regexp-Common-2010010201.tar.gz
+       cd Regexp-Common-2010010201
+       perl Makefile.PL
+       make
+       make install
+       cd ..
+       #---------------------------------------- 
+       cd /home/oldboy/tools/
+       tar zxvf Nagios-Plugin-0.34.tar.gz
+       cd Nagios-Plugin-0.34
+       perl Makefile.PL
+       make
+       make install
+       cd ..
+       #______________________ 
+
+       #for monitor iostat 
+       yum install sysstat -y
+
+       /bin/cp /home/oldboy/tools/check_memory.pl /usr/local/nagios/libexec
+       /bin/cp /home/oldboy/tools/check_iostat /usr/local/nagios/libexec
+
+       chmod 755 /usr/local/nagios/libexec/check_memory.pl
+       chmod 755 /usr/local/nagios/libexec/check_iostat
+
+       dos2unix /usr/local/nagios/libexec/check_memory.pl
+       dos2unix /usr/local/nagios/libexec/check_iostat
+       ##################################################
+       echo "------ step 5: 修改nrpe.cfg------"
+       sed -i 's/allowed_hosts=127.0.0.1/allowed_hosts=127.0.0.1,10.0.0.7/g' /usr/local/nagios/etc/nrpe.cfg 
+       #delete 199--203 
+       cp /usr/local/nagios/etc/nrpe.cfg /usr/local/nagios/etc/nrpe.cfg.ori
+       sed -i '199,203d' /usr/local/nagios/etc/nrpe.cfg
+       echo "command[check_load]=/usr/local/nagios/libexec/check_load -w 15,10,6 -c 30,25,20">>/usr/local/nagios/etc/nrpe.cfg
+       echo "command[check_mem]=/usr/local/nagios/libexec/check_memory.pl -w 6% -c 3%">>/usr/local/nagios/etc/nrpe.cfg
+       echo "command[check_disk]=/usr/local/nagios/libexec/check_disk -w 20% -c 8% -p /">>/usr/local/nagios/etc/nrpe.cfg
+       echo "command[check_swap]=/usr/local/nagios/libexec/check_swap -w 20% -c 10%">>/usr/local/nagios/etc/nrpe.cfg
+       echo "command[check_iostat]=/usr/local/nagios/libexec/check_iostat -w 6 -c 10">>/usr/local/nagios/etc/nrpe.cfg
+       echo "------ step 6: start nagios client------"
+       #start nagios client
+       pkill nrpe 
+       sleep 2
+       /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+       echo  "#nagios nrpe process cmd by oldboy 2012-6-7" >> /etc/rc.local
+       echo "/usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d">>/etc/rc.local
+       netstat -lnt|grep 5666 && echo "nagios client is ok"
+       安装故障1:
+       如果在编译时遇到 ERROR 2  则在编译过程中添加 --with-mysql=/usr/local/mysql在./configure 后面
+       添加--with-mysql=/usr/local/mysql 解决
+       安装故障2：
+       Can't locate ExtUtils/MakeMaker.pm in @INC (@INC contains: /usr/local/lib64/perl5 /usr/local/share/perl5 /usr/lib64/perl5/vendor_perl /usr/share/perl5/vendor_perl /usr/lib64/perl5 /usr/share/perl5 .) at Makefile.PL line 11
+       BEGIN failed-compilation aborted at Makefile.PL line 11.
+       Can't run perl Makefile.PL at ../tools/build_perl_modules line 68.
+       make[2]:*** [all-local] ERROR 2
+       make[2]:Leaving directory `/home/oldboy/tools/nagios-plugins-1.4.16/perlmods`
+       make[1]:*** [all-recursive] ERROR 1
+       make[1]: Leaving directory `/home/oldboy/tools/nagios-plugins-1.4.16`
+       make: *** [all] Error 2
+       解答：
+       yum install perl-ExtUtils-CBuilder per-ExtUtils-MakeMaker
+       yum install -y perl-CPAN
+       make clean
+       make 
+       make install
+       yum install perl-C* -y
+       make clean
+       make
+       make install
+       ls /usr/local/nagios/libexec/|wc -l
+       安装nrpe make all的时候错误
+       checking for SSL headers... configure: error: Cannot find ssl headers
+       解答:yum install -y openssl
+       故障3：
+       make[2]: ***[check_http.o]Error 1
+       make[2]: Leaving directory `/root/tools/nagios-plugins-1.4.16/plugins`
+       make[1]: *** [all-recursive]Error 1
+       make[1]: Leaving directory `/root/tools/nagios-plugins-1.4.16`
+       make: ***[all]Error 2
+       解决办法：
+       删掉解压包，重头编译
+       yum install perl-devel -y
+       故障4: 
+       check_http.c: In function 'process_arguments'
+       check_http.c:312:error:'ssl_version' undeclared (first use in this function)
+       check_http.c:312:error:(Each undeclaredidentifier is reported only once
+       check_http.c:312:error:for each function it appears in)
+       ...
+       问题解决
+       make clean
+       yum install -y openssl openssl-devel
+       删除nagios-plugins-1.4.16目录
+       重新解压，编译安装
+       nagios的目录结构：
+       ls /usr/local/nagios/
+       bin:是nagios相关命令的目录
+       etc:是angios配置文件及目录信息
+       share:是nagios界面展示的PHP程序等内容目录
+       var:是nagios的数据及日志目录
+       libexec:nagios的所有插件的目录路径
+       include:是nagios的包含文件
+       sbin：是一些cgi的程序
+ 第三部分 配置server端nagios监控的服务
+       nagios.cfg：是nagios的主配置文件
+       htpasswd.users:是一个web的密码验证文件
+       nagios配置文件说明:(/usr/local/nagios/object)
+       配置文件名称                          说明
+       commands.cfg          存放nagios命令相关配置(也可指定command目录)
+                             ，这里的命令不是系统命令，而是
+                             实现把nagios里的定义的命令和linux系统的插件命令关联的一个文件
+       services.cfg          存放具体被监控的服务相关配置内容(上百台以上可指定services目录)                      ，(默认不存在)
+       hosts.cfg             存放具体被监控的主机相关配置(上百台以上可指定hosts目录)                      ，(默认不存在)
+       contacts.cfg          存放报警联系人相关配置的文件
+       timeperiods.cfg       存放报警周期时间等相关配置
+       templates.cfg         模板配置文件，
+                             模板的存在是为了方便的配置服务配置，类似于shell里的函数功能
+   3.2 配置主配置文件nagios.cfg
+     在nagios文件中找到cfg_file部分，进行如下设置:
+     tar zcvf etc.tar.gz ./etc/
+     vim /usr/local/nagios/etc/nagios.cfg +34 添加如下配置内容
+     cfg_file=/usr/local/nagios/etc/objects/services.cfg
+     cfg_file=/usr/local/nagios/etc/objects/hosts.cfg
+     将38行的配置cfg_file=/usr/local/nagios/etc/objects/localhost.cfg注释掉(#cfg_file=/usr/local/nagios/etc/objects/localhost.cfg)
+     将54行的配置#cfg_dir=/usr/local/nagios/etc/servers修改为cfg_dir=/usr/local/nagios/etc/services或者直接在58行添加一行配置cfg_dir=/usr/local/nagios/etc/services，保存退出nagios.cfg
+     mkdir /usr/local/nagios/etc/objects/services
+     chown -R nagios.nagios /usr/local/nagios/etc/objects/services
+     生成hosts.cfg文件
+     cd /usr/local/nagios/etc/objects/
+     touch host.cfg
+     head -51 localhost.cfg >>host.cfg
+     chown nagios.nagios /usr/local/nagios/etc/objects/hosts.cfg
+     生成service.cfg配置文件
+     cd /usr/local/nagios/etc/objects/
+     touch services.cfg
+     chown -R nagios.nagios services.cfg
+   3.3.3 nagios的监控模式定义及监控模式的选择
+       按照监控的行为来看，我们可以把nagios的监控分为主动监控与被动监控(nrpe半被动监控和NSCA全被动监控)
+       主动监控：我们把象URL监控这样的一般由nagios服务器端发出请求主动探测就可以得到数据的
+       监控方式，定义为主动监控方式，也就是说不需要在客户端安装任何插件，当然，主动监控模式也可以配置成被动模式
+       半被动监控：我们把对负载，内存，硬盘，虚拟内存，磁盘IO，温度，风扇转速等的监控，这些都是本地资源，而非系统对外提供的服务，这种资源的监控一般由nagios服务器端通过nrpe插件定时去连接client的nrpe服务定期获取信息发回到nagios服务端，这样的监控我们称之为
+       半被动监控，只要安装了类似NRPE的插件方式的监控，我们都认为是本被动监控，这里有关真正的被动监控NSCA的情况，我们暂且忽略
+           如何选择主动模式和半被动模式？
+           1)对于本地的资源性能等的监控，一般用被动模式，例如：堆负载，内存，硬盘，虚拟内存
+           磁盘，IO，温度，风扇灯的监控(我们也可以通过snmp实现监控部分系统资源)
+           2)对于WEB服务，数据库服务这种能对外提供服务的监控，一般用主动模式，例如：监控http,ssh,mysqld,rsync等的服务
+           3)主动模式和被动模式是相对的，并且是可以互相转换的，即主动模式的服务，可以改成被动模式，
+           被动模式的服务有时也可以改为主动模式
+           主动模式：和nrpe无关，是利用服务器端本地插件直接获取信息
+           被动模式：主程序通过check_nrpe插件，和客户端nrpe进程沟通，调用本地插件获取数据
+
+  3.3.3 hosts.cfg生产库实战配置例子语法
+   3.3.3.1 hosts.cfg中主机定义部分配置参数详解
+         hosts.cfg一般用来存放主机的相关配置，设置机器名为180-lnmp-1，格式(ip-服务-组内机器ID),
+         vim /usr/local/nagios/etc/objects/hosts.cfg
+         # HOST DEFINITION
+         # Define a host for the local machine
+
+         define hosts {
+                 use              linux-server #模板的名字，这名字的相关配置会对应于/usr/local/nagios/etc/object/templates. 
+                 #cfg文件中的linux-server选项的配置     
+                 host_name        08-client01
+                 alias            08-client01
+                 address          10.0.0.8
+                 }
+         define hosts {
+                 use              linux-server #模板的名字，这名字的相关配置会对应于/usr/local/nagios/etc/object/templates. 
+                 #cfg文件中的linux-server选项的配置     
+                 host_name        07-client02
+                 alias            07-client02
+                 address          10.0.0.7
+                 }
+        # Define GROUP DEFINITION
+        # Define an optional hostgroup for linux machines
+
+        define hostgroup {
+                hostgroup_name  linux-servers
+                alias           linux-servers
+                members         07-client02,08-client01
+        }
+        保存退出
+        修改 /etc/init.d/nagios配置文件的178行(vim /etc/init.d/nagios)，将$NagiosBin -v $NagiosCfgFile > /dev/null 2>&1修改为$NagiosBin -v $NagiosCfgFile
+        执行/etc/init.d/nagios checkconfig这个命令后，会显示详细的语法检查过程
+        创建一个services.cfg文件，并添加如下内容选项
+        vim /usr/local/nagios/etc/objects/services.cfg
+        define service {
+                use                      generic-service  #服务模板名称
+                host_name                08-client01
+                service_description      Disk Partition
+                check_command            check_nrpe!check_disk
+        }
+        执行/etc/init.d/nagios checkconfig这个命令后，会显示详细的语法检查过程
+        创建 commands.cfg 配置文件,并添加以下选项内容
+        vim /usr/local/nagios/etc/objects/commands.cfg
+        #'check_nrpe' command definition 
+        define command{
+                command_name    check_nrpe
+                command_line    $USER1$/check_nrpe -H $HOSTADDRESS$ -c $ARG1$
+                }
+        修改/usr/local/nagios/etc/nrpe.cfg 配置文件的第79行为以下内容
+        vim /usr/local/nagios/etc/nrpe.cfg +79
+        allowed_hosts=127.0.0.1,10.0.0.7
+        pkill nrpe
+        /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+        /usr/local/nagios/libexec/check_nrpe -H 10.0.0.8 -c check_disk #测试配置
+        netstat -lntup | grep nagios
+        /etc/init.d/nagios reload
+        在客户端浏览器输入http://10.0.0.7/nagios/,会出现以下错误:
+        It appears as though you do not have permission to view information for any of the services you 
+        requested...
+
+          if you believe this is an error,check the HTTP server authentication requirements for accessing
+          this CGI and check authorization options in your CGI configuration file
+          解决办法：
+          cd ../
+          vim cgi.cfg
+          (:g/nagiosadmin/s//oldboy/g)或sed -i 's#nagiosadmin#oldboy#g' /usr/local/nagios/etc/cgi.cfg
+          /etc/init.d/nagios reload
+          在客户端浏览器输入http://10.0.0.7/nagios/
+          加快naigos监控信息的刷新速度的方法
+          vim /usr/local/nagios/etc/nagios.cfg 
+          将 status_update_interval=10 修改为 status_update_interval=1s
+          将 command_check_interval=-1 修改为 command_check_interval=2
+          将 max_service_check_spread=30 修改为 max_service_check_spread=10
+          将 auto_rescheduling_interval=30 修改为 auto_rescheduling_interval=5
+          将 retention_update_interval=60 修改为 retention_update_interval=10
+          将 interval_length=60 修改为 interval_length=10
+          将 service_freshness_check_interval=60 修改为 service_freshness_check_interval=10
+          将 host_freshness_check_interval=60 修改为 host_freshness_check_interval=10
+          /etc/init.d/nagios start
+          添加其他的配置内容选项：
+          vim /usr/local/nagios/etc/objects/services.cfg
+          define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    Disk Partition
+                  check_command          check_nrpe!check_disk
+          }
+          define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    load
+                  check_command          check_nrpe!check_load
+          }
+          define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    Swap Useage
+                  check_command          check_nrpe!check_swap
+          }
+           define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    mem
+                  check_command          check_nrpe!check_mem
+          }
+           define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    iostat
+                  check_command          check_nrpe!check_iostat
+          }
+          /etc/init.d/nagios checkconfig
+          /etc/init.d/nagios reload
+          vim /usr/local/nagios/etc/nrpe.cfg添加command命令
+          command[check_disk]=/usr/local/nagios/libexec/check_disk -w $ARG1$ -c $ARG2$ -p $ARG3$
+          保存退出
+          pkill nrpe
+          /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+          vim /usr/local/nagios/etc/objects/services.cfg
+          define service {
+                   use                      generic-service
+                   host_name                08-client01,07-client02
+                   service_description      ping
+                   check_command            check_nrpe!check_ping
+                   }
+     3.9.2 增加从nagios服务器端发起的监控：如url地址，端口监控
+          此类服务一般都是开启了对外提供服务的业务。这样的业务，我们一般采用主动监控的方式，当然了，我们可以写脚本通过被动的方式来监控，但是一般我们不这么做
+          url监控实质：命令行理解http监控原理
+          /usr/local/nagios/libexec/check_http -H 10.0.0.8
+          /usr/local/nagios/libexec/check_http -H 10.0.0.8 -u / index.html
+     3.9.2.1 对域名URL地址http://blog.etiantian.org的监控
+           1：添加要监控的服务配置到08-client01.cfg,  
+           cd /usr/local/nagios/etc/services
+           vim abc.cfg 
+           ##check url
+           # url example http://blog.etiantian.org
+           define service {
+                  use                     generic-service
+                  host_name               08-client01
+                  service_description     blog_url1
+                  check_command           check_weburl!-H 10.0.0.8
+                  max_check_attempts      3
+                  normal_check_interval   2
+                  retry_check_interval    1
+                  check_period            24*7
+                  notification_interval   30
+                  notification_period     24*7
+                  notification_options    w,u,c,r
+                  contact_groups          admins
+                  }
+                  当然也可以不用自己定义check_weburl,而使用配置自带check_http.
+        
+           define service {
+                  use                     generic-service
+                  host_name               08-client01
+                  service_description     blog_url2
+                  check_command           check_weburl!-H blog.etiantian.org
+                  max_check_attempts      3
+                  normal_check_interval   2
+                  retry_check_interval    1
+                  check_period            24*7
+                  notification_interval   30
+                  notification_period     24*7
+                  notification_options    w,u,c,r
+                  contact_groups          admins
+                  }
+
+           define service {
+                  use                     generic-service
+                  host_name               08-client01
+                  service_description     blog_poty_80
+                  check_command           check_tcp!80
+                  max_check_attempts      3
+                  normal_check_interval   2
+                  retry_check_interval    1
+                  check_period            24*7
+                  notification_interval   30
+                  notification_period     24*7
+                  notification_options    w,u,c,r
+                  contact_groups          admins
+                  }
+               2:添加如下命令行到command.cfg(/usr/local/nagios/etc/command.cfg)
+               #'check_weburl' command definition
+               define command {
+                      command_name       check_weburl
+                      command_line       $USER1$/check_http $ARG1$ -w 10 -c 30
+               }
+               或者
+               # 'check_http' command definition
+               define command {
+                      command_name       check_http
+                      command_line       $USER1$/check_http -I $HOSTADDRESS$ $ARG1$
+               } 
+               #===>实际就是利用check_http插件，查看帮助的方法如下：
+               cd /usr/local/nagios/libexec/
+               /etc/init.d/nagios reload
+               /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+               测试配置
+               cd /usr/local/nagios/libexec/
+               ./check_http -H blog.etiantian.org
+               ./check_http -H blog.etiantian.org -u /dynamic/
+      3.9.2.3 对特殊传参的URL地址的监控
+          #http://blog.etiantian.org/acticle/index.php?m=article&list&id=670
+          define service{
+                 use                        generic-service
+                 host_name                  08-client01
+                 service_description        blog_url3
+                 check_command              check_weburl! -H blog.etiantian.org -u "/article/index.php?m=article&a=list&id=670" 或者 check_http! -H 10.0.0.8 -u "/oldboy/index.html"
+                 max_check_attempts           2
+                 normal_check_interval        2
+                 retry_check_interval         2
+                 check_period                 24*7
+                 notification_interval        2000
+                 notification_period          24*7
+                 notification_options         w,u,c,r
+                 contact_groups               sausers_paper_admins,admins
+          }
+          /etc/init.d/nagios reload
+          pkill nrpe
+          /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+          例2：监控rsysnc服务
+          vim /etc/rsyncd.conf
+          rsync --daemon
+          lsof -i :873
+          cd /usr/local/nagios/etc/services/port.cfg
+          define service {
+                  use                     generic-service
+                  host_name               08-client01
+                  service_description     blog_poty_3306
+                  check_command           check_tcp!3306
+                  max_check_attempts      3
+                  normal_check_interval   2
+                  retry_check_interval    1
+                  check_period            24*7
+                  notification_interval   30
+                  notification_period     24*7
+                  notification_options    w,u,c,r
+                  contact_groups          admins
+                  }
+          define service {
+                  use                     generic-service
+                  host_name               08-client01
+                  service_description     blog_poty_873
+                  check_command           check_tcp!873
+                  max_check_attempts      3
+                  normal_check_interval   2
+                  retry_check_interval    1
+                  check_period            24*7
+                  notification_interval   30
+                  notification_period     24*7
+                  notification_options    w,u,c,r
+                  contact_groups          admins
+                  }
+          小结：一般客户端对外开启的服务，用主动模式监控，例如：port,url.
+          主动模式的监控配置过程
+          1：在服务端的命令行要把要监控的命令先调试好
+          2：在commands.cfg里定义nagios命令，同时调用命令行的插件
+          3：在服务的配置文件里定义要监控的服务，调用commands.cfg里定义nagios的监控命令
+          例：被动模式监控80端口.
+          /usr/local/nagios/libexec/check_tcp -H 10.0.0.8 -p 80
+          被监控端的操作：在配置文件nrpe.cfg的最后一行添加如下操作
+          vim /usr/local/nagios/etc/nrpe.cfg
+          command[check_port_80]=/usr/local/nagios/libexec/check_tcp -H 10.0.0.8 -p 80
+          或者：command[check_port_80]=/usr/local/nagios/libexec/check_tcp -H 10.0.0.8 -p 80 -w 5 -c 10
+          /usr/local/nagios/libexec/check_tcp -H 10.0.0.8 -p 80 -w 5 -c 10
+          pkill nrpe
+          ps -ef | grep nrpe
+          /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+          在监控服务器端的操作
+          /usr/local/nagios/libexec/check_nrpe -H 10.0.0.8 -c check_port_80
+          vim /usr/local/nagios/etc/services/nrpe.cfg
+          define service {
+                  use                     generic-service
+                  host_name               08-client01
+                  service_description     blog_port_80_beidong
+                  check_command           check_nrpe!check_port_80
+                  max_check_attempts      3
+                  normal_check_interval   2
+                  retry_check_interval    1
+                  check_period            24*7
+                  notification_interval   30
+                  notification_period     24*7
+                  notification_options    w,u,c,r
+                  contact_groups          admins
+                  }
+          /etc/init.d/nagios checkconfig
+          /etc/init.d/nagios reload
+
+          nagios常见故障解决方案
+                    故障1：connection refused by host
+          解决办法：
+          1：首先先检查nagios客户端服务是否启动,防火墙是否开启
+          2：检查nrpe.cfg中是否定义了改命令的参数(例如这一行选项是否定义：command[check_disk]=/usr/local/nagios/libexec/check_disk -w 20% -c 8% -p)
+          pkill nrpe
+          /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+          故障2：当执行./check_nrpe -H 127.0.0.1 -c check_disk这个命令后，出现CHECK_NRPE: ERROR - Could
+          not complete SSL handshake
+          解决办法：
+          vim /usr/local/nagios/etc/nrpe.cfg +79，修改allowed_hosts=127.0.0.1为allowed_hosts=127.0.0.1，10.0.0.241(要添加nagios服务器端的IP地址)
+           pkill nrpe
+          /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+          故障3 出现Unable to read output这个错提示，说明监控脚本没有执行权限
+          解决办法：
+          1）先在监控服务器端使用命令/usr/local/nagios/libexec/check_nrpe -H 10.0.0.8 -c check_mem后，查看该命令的执行状况。
+          2）然后在被监控端使用命令/usr/local/nagios/libexec/check_nrpe -H 127.0.0.1 -c check_mem
+          3) 然后在被监控端使用命令/usr/local/nagios/libexec/check_memory.pl -w 6% -c 3%
+          4) 给改监控脚本增加执行权限(例如:chmod +x check_memory.pl)
+          故障4：Return code 127 is out bounds - plugin may be missing错误原因及解决
+          解决办法
+          1：类似问题就是因为缺少插件(如:check_disk).在command.cfg里未定义，或者定义了实际插件不存在
+          2：检查服务器端和客户端的/usr/local/nagios/libexec目录是否有services.cfg里使用的插件(如，check_weburl(自定义的要看实际用的)，check_disk,check_load,check_mem,check_nrpe)
+          3:手工开发或者重新安装出问题的插件即可
+          故障5：Timeout while attempting connection | Connection refused or time out 错误
+          这故障一般是由于防火墙出现的故障
+          解决办法:
+          /etc/init.d/iptables stop
+          故障6：Internal Server Error 错误
+          解决办法：
+          vim /etc/selinux/config #修改SELINUX项为disabled
+          SELINUX=enable #重起生效
+          故障7：CRITICAL - Socket timeout after 31 seconds
+          该故障很可能是网络故障或者服务器拒绝连接或防火墙拦截等影响。
+   3.9.5 服务分组举例
+         vim /usr/local/nagios/etc/objects/services/servicegroup.cfg
+         define servicegroup {
+                 servicegroup_name Swap Useage
+                 alias             Linux Servers ; Long name of the group
+                 members           08-client01,Swap Useage,07-client02,Swap Useage
+         }
+         /etc/init.d/nagios reload
+         主机分组举例
+         define hostgroup {
+                hostgroup_name linux-servers ; The name of the hostgroup
+                alias          Linux Servers ; Long name of the group
+                members        08-client01,07-client02
+         }
+         例：根据不同管理员显示不同的主机和服务，分用户分类显示主机和服务
+         tail /usr/local/nagios/var/nagios.log #nagios日志文件
+   3.9.6 host.cfg中的主机定义部分配置参数详解
+          define host {
+                 use         linux-server #定义主机使用的模板名称，具体参见templates.cfg
+                 host_name   180-lnmp-1   #直接定义主机名称，根据服务功能可随意定义
+                 alias       180-lnmp-1   #直接定义主机别名
+                 address     10.0.0.180   #直接定义被监控服务器的IP
+                 check_command   check_host_alias  #检测主机存活命令，来自command.cfg
+                 max_check_attempts      3         #故障后，最大尝试检测次数
+                 normal_check_interval   2         #正常的检查间隔，默认单位分钟
+                 retry_check_interval    2         #故障后重试的检查间隔，默认单位分钟
+                 check_period            24*7      #检查周期 24*7 具体参见timeperiod.cfg
+                 notification_interval   300       #故障后，两次报警的通知间隔，默认单位分钟。
+                 notification_period     24*7      #一天之内通知的周期，比如全体，还是半天等，具体参见timeperiods.cfg
+                 notification_options    d,u,r  #主机状态通知选项 d-down u-unreacheable,r-recovery
+                 contact_groups          admins  #报警到admin用户组。在contacts.cfg里定义
+                 }
+    3.9.7 services.cfg 配置文件的service配置参数详细说明
+          define service {
+                 use              generic-service #定义该服务使用的模板，具体参见tempplates.cfg
+                 host_name        180-lnmp-1      #被监控的主机名，来自hosts.cfg,可在hosts.cfg中自定义
+                 service_description  Current Load #报警服务描述，根据内容取有意义的名称.
+                 check_command        check_nrpe!check_load #检查服务的命令，这个很关键，注意被动服务的监控均由check_nrpe调用.
+                 max_check_attempts       2 #尝试检查的最大次数
+                 normal_check_interval    4 #正常状态检查时间间隔，每4分钟去检查一次是否正常
+                 retry_check_interval     4 #重试检查时间间隔，默认单位是分
+                 check_period             24*7 #检查的周期，24*7仅仅是个字符串而已.
+                 notification_interval    1440  #通知的间隔，即1440分通知一次.
+                 notification_period      24*7  #通知的周期，这个参数来自timeperiods.cfg中的配置，例如：可以定义编译不报警的短信手机
+                 notification_options     w,u.c,r #要通知的服务状态选项 w-warning u-unknow,c-critical,r-recovery.
+                 contact_group            admins #要通知的用户组，其定义来自contacts.cfg
+                 process_perf_data        1      #PNP出图记录数据相关
+          } 
+          下面是配置监控客户端本地服务举例
+          sed -n '153,177p' ../objects/templates.cfg >a.cfg
+          报警组配置例子
+          define contact {
+                  contact_name         oldboy
+                  use                  generic-contact
+                  alias                Nagios Admin
+                  email                oldboy@qq.com
+          }
+          define contact {
+                  contact_name         oldgirl
+                  use                  generic-contact
+                  alias                Nagios Admin
+                  email                oldgirl@126.com
+          }
+          define contactgroup{
+                  contactgroup_name    sas
+                  alias                Nagios Administrators
+                  members              oldboy,oldgirl
+                  }
+          vim /usr/local/nagios/etc/objects/templates.cfg 修改 contact_groups admins 为 contact_groups admins,sas
+          vim /usr/local/nagios/etc/objects/services/08-client01.cfg，在每个service的选项里都
+          都添加contact_groups admins,sas
+          例如
+         define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    Disk Partition
+                  check_command          check_nrpe!check_disk
+                  contact_groups         admins,sas
+          }
+          define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    load
+                  check_command          check_nrpe!check_load
+                  contact_groups         admins,sas
+          }
+          define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    Swap Useage
+                  check_command          check_nrpe!check_swap
+                  contact_groups         admins,sas
+          }
+           define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    mem
+                  check_command          check_nrpe!check_mem
+                  contact_groups         admins,sas
+          }
+           define service {
+                  use                    generic-service
+                  host_name              08-client01,07-client02
+                  service_description    iostat
+                  check_command          check_nrpe!check_iostat
+                  contact_groups         admins,sas
+          }
+  第六部分 nagios插件开发
+   6.6.1 什么是nagios插件？
+        我们在前文部署nagios服务时安装了nagios-plugins-1.4.16.tar.gz,这个软件包就是nagios的插件
+        安装包，安装后，我们执行 ls -l /usr/local/nagios/libexec可以看到如下插件内容
+        ls -l /usr/local/nagios/libexec/egrep "nrpe|tcp|http|disk|swap|load"
+        以上结果内容都是nagios的插件，说到这，大家应该对nagios插件有了一个了解，其实，nagios软件
+        本事仅仅是一个监控的平台，如果要监控具体的主机及服务的状态和数据信息，还必须要配置或调用插件或程序文件才能完成任务，因此，如果没有nagios插件，nagios就是一个空壳，啥都做不了。
+   6.6.2 为什么要开发nagios插件？
+        既然已经安装了插件软件包，为什么还要nagios插件呢？
+        首先说生产场景中常用的大部分服务，都是不需要编写插件就可以完成监控的，如check_http,check_tcp,check_nrpe,这些自带的插件已经很强大，但是，仍然有部分我们想要监控的服务，nagios没有自带的插件，如：LVS RS的lo网卡的VIP,如监控NFS的状态，再比如监控iostat,mem,sar系统指标及相关APP应用(MQ队列)等
+        这个时候我们有两个选择，一个是去网上去G，看看有没有别人写过，拿来使用或修改使用，另外一个方面是自己开发编写，这里老男孩推荐大家要学会手工编写插件，如果开始不会写，可以把网上的别人分享的插件拿来改，改改就会写了，当然我们这里，大家拿老师的去改就好了。
+   6.6.3 编写nagios插件规则
+   6.6.3.1 编写nagios插件说明
+       Nagios插件是Nagios提供的一种通过可扩展的方式部署的程序组件，该插件可通过JAVA,C\C++,PHP等多种语言开发，运维或系统架构人员只要通过修改nagios配置文件和相应参数，就很方便地将该插件集成到nagios中，实现对目标系统的监控
+       Nagios插件程序提供两个返回值：一个插件的退出状态吗，另一个是插件是控制台打印的第一行数据
+       .退出状态吗可以被Nagios主程序作为判断被监控系统服务状态的依据，控制台打印的第一行数据可以
+       被nagios主程序作为被监控系统服务状态的补充说明，会显示在管理页面里面
+
+       为了管理nagios插件，Nagios每查询一个服务的状态时，就会产生一个子进程，并且它说明来自该命令的输出和退出代码来确定具体的状态，Nagios主程序可识别的状态吗和说明如下：
+       ok     -退出代码 0-表示服务正常地工作
+       WARNING  -退出代码 1-表示服务处于警告状态
+       CRITICAL -退出代码 2-表示服务处于紧急，严重状态。
+       UNKNOWN  -退出代码 3-表示服务处于未知状态。
+       最后一种状态通常表示该插件无法确定服务的状态，例如，可能出现了网络或内部错误。相关状态我们能可以从如下文件中看到：
+       可以通过命令head -7 utils.sh可以看到状态值和返回值
+  6.3.2 Nagios插件开发原理
+      Nagios插件程序中需要调用监控服务规定的操作序列，并根据预定义的规则，对返回值结果进行
+      分析，判断服务的当前状态，并以指定的状态码退出程序，同时将对该状态的说明不换行输出到控制台。
+      Nagios插件程序提供两个返回值，一个是插件的退出状态码，另一个是插件在控制台打印的第一行数据。
+      不同语言的系统退出函数示例如下：
+      Java     System.exit(int status)
+      php      exit(status)
+      python   sys.exit(int status)
+      c/c++    return int status
+      bash     exit int status
+      另一个是插件在控制台打印的第一行数据。
+      控制台打印函数示例如下：
+      Java          System.out.println(String msg)
+      php           echo msg
+      python        print msg
+      c/c++         print("%s",msg)
+      bash          echo msg(printf)
+  6.6.4 nagios插件开发语言
+      nagios的插件开发不限制任何开发语言，只要该插件能被nagios调用获取到相应服务数据就OK，如能在
+      命令行执行输出结果也可以，常用的插件语言有Shell,perl,python,php,c/c++.
+  6.6.5 使用shell开发nagios插件
+  6.6.5.1 编写检查weburl地址的插件
+      cat check_url
+      #!/bin/sh
+      wget -T 10 --spider 10.0.0.17 >/dev/null 2>&1
+      if [ $? -eq 0 ]
+      then
+        echo "URL 10.0.0.17 OK"
+        exit 0
+      else
+        echo "URL 10.0.0.17 CRITICAL"
+        exit 2
+      fi
+  6.5.1.1 编写nagios插件前的几个变量测试
+      a.测试变量的脚本
+      echo $0
+      PROGNAME=`basename $0`
+      PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+      echo $PROGNAME
+      echo $PROGPATH
+  其他方法：
+      basename /etc/inittab
+      dirname /etc/inittab
+      cat /server/scripts/oldboy.sh
+      echo $0
+      PROGNAME=`basename $0`
+      PROGPATH=`dirname $0`
+      echo $PROGNAME
+      echo $PROGPATH
+  b.执行oldboy.sh脚本
+    sh /usr/local/nagios/etc/oldboy.sh
+  6.5.1.2 监控weburl的插件脚本(主动模式)
+      cat check_url.sh
+      #!/bin/sh
+      #########################################
+      #   this script function is:             #
+      #   check_url                            #
+      #   Create by oldboy 2011-07-17          #
+      #   mail:oldboy521@gmail.com qq:31333741 #
+      #########################################
+      PROGNAME=`basename $0`
+      PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+      #替代
+      #basename /etc/inittab
+  自定义插件的开发例子：
+      md5sum /etc/passwd >/etc/oldboy.md5
+      md5sum -c /etc/oldboy.md5
+      cd /usr/local/nagios/libexec/
+      vim check_passwd
+      #!/bin/sh
+      char=`md5sum -c /etc/oldboy.md5 2>/dev/null|grep "OK"|wc -l`
+      if [ $char -eq 1 ]; then
+        echo "passwd is ok"
+        exit 0
+      else
+        echo "passwd is changed"
+        exit 2
+      fi
+      #sh check_passwd
+      #chmod +x check_passwd
+  被动模式例子：
+      ls /usr/local/nagios/libexec/check_passwd
+      cd -
+  添加如下选项内容
+      vim nrpe.cfg
+      command[check_passwd]=/usr/local/nagios/libexec/check_passwd
+  保存退出
+      ps -ef | grep nrpe
+      pkill nrpe
+      /usr/local/nagios/bin/nrpe -c /usr/local/nagios/etc/nrpe.cfg -d
+  在监控端测试配置命令
+      cd /usr/local/nagios/libexec/
+      ./check_nrpe -H 10.0.0.8 -c check_passwd
+      cd -
+  在services.cfg配置文件添加如下内容选项
+      vim services.cfg
+      define service {
+             use                      generic-service
+             host_name                08-client01
+             service_description      check_passwd
+             check_command            check_nrpe!check_passwd
+             }
+  保存退出
+  /etc/init.d/nagios checkconfig
+  /etc/init.d/nagios reload
+  例子2：使用nagios来自定义插件监控MYSQL主从复制
+  !/bin/bash
+  host=$1
+  port=$2
+  user=$3
+  passwd=$4
+  log_command="/usr/local/mysql"
+  check_command="show slave status\G;"
+  Slave_IO=`$log_command -h $host -u$port -p$passwd -e "check_command"|grep Slave_IO_Running`
+  Slave_SQL=`$log_command -h $host -u$port -p$passwd -e "check_command"|grep Slave_SQL_Running`
+  Seconds=`$log_command -h $host -u$port -p$passwd -e "check_command"|grep Seconds_Behind_Master`
+  if [ $Slave_IO == YES ] && [$Slave_SQL == YES ]
+  then
+      echo Slave_Status is ok ! Seconds_Behind_Master is $Seconds
+      exit 0
+  elif [ $Seconds -gt 3 && $Seconds -le 10 ]
+  then
+  exit 1
+  else
+  exit 2
+  fi
+  被动模式部署：
+  ls /usr/local/nagios/libexec/check_passwd
+  cd -
+  添加如下选项内容
+  vim nrpe.cfg
+  command[check_mysql_status]=/usr/local/nagios/libexec/check_mysql_status.sh 192.168.100.105 3306 mysql mysql
+  services.cfg
+  define service {
+           use                      generic-service
+           host_name                08-client01
+           service_description      Mysql Slave Status BeiDong
+           check_command            check_nrpe!check_mysql_status
+        }
+  主动模式部署：
+  commands.cfg
+  define command {
+          command_name       check_mysql_status
+          command_line       $USER1$/check_mysql_status.sh $ARG1$ $ARG2$ $ARG3$ $AGR4$
+        }
+  services.cfg
+  define service {
+          use                      generic-service
+          host_name                08-client01
+          service_description      Mysql Slave Status ZhuDong
+          check_command            check_mysql_status!192.168.100.105 3306 mysql mysql
+         }
+  例3：nagios主机分组，服务分组，权限分配
+  第四部分 nagios图形监控显示和管理[服务端]
+  虽然能显示，能报警，但是我们企业工作中需要一个历史趋势图。
+  4.4.1 Pnp 安装图形监控曲线(服务器端)
+  4.4.1.1 yum安装pnp需要的软件包
+          pnp出图软件官方站点为：http://www.pnp4nagios.org
+          先执行yum安装下面基础pnp软件需要的包，如果有重复的再执行下也不会有问题
+          yum install cairo pango zlib zlib-devel freetype freetype-devel gd gd-devel -y
+  4.4.1.2 安装libart_lgpl,rrdtool
+          当然也可以 yum install libart_lgpl libart_lgpl-devel -y，这里用编译方式为例:
+          cd /home/oldboy/tools/nagios/
+          wget http://ftp.gnome.org/pub/gnome/sources/libart_lgpl/2.3/libart lgpl-2.3.17.tar.gz
+          tar xf libart_lgpl-2.3.17.tar.gz
+          cd libart_lgpl-2.3.17
+          ./configure
+          make
+          make install
+          /bin/cp -r /usr/local/include/libart-2.0 /usr/include
+          cd ../
+  4.1.3 安装rrdtool
+         wget http://oss.oetiker.ch/rrdtool/pub/rrdtool-1.2.14.tar.gz
+         tar xf rrdtool-1.2.14.tar.gz
+         cd rrdtool-1.2.14
+         ./configure --prefix=/usr/local/rrdtool --disable-python --disable-tcl
+         make
+         make install
+         cd ../
+         ls -l /usr/local/rrdtool/bin 
+         安装时出现的故障问题
+         make[4]:Entering directory `/home/oldboy/tools/nagios/pnp/rrdtool-1.2.14/bindings/perl-piped`
+         perl: warning: Setting local failed.
+         perl: warning: Please check that you locale settings:
+                  LANGUAGE = (unset),
+                  LC_ALL = (unset),
+                  LANG = "zh_cn.gb18030"
+                are supported and installed on your system
+          解决办法：见本文文章开头2.1解决perl编译问题
+          2.1.2 解决perl编译问题[同server端]
+          后面编译的软件有perl程序，这里要提前设置下环境变量。
+          批量执行命令如下：
+          echo 'export LC_ALL=C'>> /etc/profile
+          tail -1 /etc/profile
+          source /etc/profile
+          echo $LC_ALL
+          cd ~
+   4.4.1.4 安装pnp-0.4.14.tar.gz
+          wget http://downloads.sourceforge.net/project/pnp4nagios/PNP/pnp-0.4.14/pnp-0.4.14.tar.gz?use mirror=cdnetworks-kr-2&80495215
+          tar zxf pnp-0.4.14.tar.gz
+          cd pnp-0.4.14
+          ./configre --with-rrdtool=/usr/local/rrdtool/bin/rrdtool 
+          --with-prefdata-dir=/usr/local/nagios/share/perfdata
+          make all
+          make install
+          make install-config
+          make install-init
+          ls /usr/local/nagios/libexec/ |grep process
+          cd ../
+          安装时的故障：
+          checking for linker flags for loadable modules... -shared
+          checking for Perl Module Time::HiRes...no
+          configure: error: Perl Module Time::HiRes not available
+          解决办法：configure报错
+          yum install perl-Time-HiRes -y
+          ls /usr/local/nagios/libexec/|grep process
+   4.4.1.5 nagios 出图相关基本配置
+          cd /usr/local/nagios/etc/
+          cp nagios.cfg nagios.cfg.ori
+          1)执行编辑命令vim /usr/local/nagios/etc/nagios.cfg +833，修改nagios.cfg主配置文件。
+          #--------------------------------------------------
+          process_performance_data=1 #默认值为0，改为1
+          #找到如下几项，去掉注释，在此时的844,845行
+          #--------------------------------------------------
+          host_perfdata_command=process-host-perfdata
+          service_perfdata_command=process-service-perfdata
+          2)执行编辑命令vim /usr/local/nagios/etc/objects/commands.cfg +227,修改commands.cfg
+          #修改 commands.cfg 配置文件，约234-245行
+          #默认配置为(如果没有直接添加即可)
+          #------------------------------------------------------
+          # 'process-host-prefdata' command definition
+          define command {
+                   command_name          process-host-perfdata
+                   command_line          /usr/local/nagios/libexec/process_prefdata.pl 
+          } 
+          #'process-service-perfdata' command definition
+          define command {
+                  command_name        process-service-prefdata
+                  command_line        /usr/local/nagios/libexec/process_prefdata.pl
+          }
+          也可以用nagios 变量$USER$替代/usr/local/nagios/libexec/路径
+          /etc/init.d/nagios checkconfig
+          /etc/init.d/nagios reload
+          在浏览器上输入http://10.0.0.7/nagios/pnp/index.php
+          安装时出现的故障1：PHP GD Support not found
+          解决办法：该故障是因为gd软件库没有安装
+          yum install php-gd gd gd-devel -y
+          安装时出现的故障2:
+          Hostname is not set.Directory 
+          /usr/local/nagios/share/perfdata//is empty
+          No RRD files(yet),Please check http://www.pnp4nagios.org/pnp/verify
+          如果出现这个图形结果，先别着急，等一等，刷新下一般就会正常了
+    4.4.2 配置各个服务出监控状态图
+    4.4.2.1 服务出图记录数据设置
+          执行编辑命令 vim services.cfg,在各个服务配置里加"process_perf_data 1"细心的同学早就看到了.前面的本地监控服务的配置里已经加好了。
+          define service {
+                  use                   generic-service
+                  host_name             180-lnmp-1
+                  service_description   Disk Iostat
+                  check_command         check_nrpe!check_iostat!5!11
+                  max_check_attempts        2
+                  normal_check_interval     4
+                  retry_check_interval      4
+                  ...
+                  process_perf_data         1
+          }
+    4.4.2.2 主机出图记录数设置
+         vim hosts.cfg同理，一般主机里不需要加，这次也给大家顺便总结了
+         define host {
+                 use             linux-server
+                 host_name       180-lnmp-1
+                 alias           180-lnmp-1
+                 address         10.0.0.180
+                 check_command   check-host-alive 
+                 max_check_attempts    3
+                 normal_check_intarval  2
+                 ...
+                 process_perf_data      1
+         }
+   4.4.4.3 整合pnp url超链接到nagios图形显示界面里
+       提示：这会在主机或对应服务前面，出现一个红太阳图标，点击就是对应的服务图形监控状态趋势。
+   4.4.3.1 给主机添加红太阳超链接图标
+       默认情况pnp的url为http://10.0.016/nagios/pnp/index.php 和nagios 不在一个界面里，所以查看服务对应的
+       趋势图很费劲，OK,1,2,3...搞。嘿。
+       方法1:vim /usr/local/nagios/objects/hosts.cfg加入如下内容
+       #graphic for hosts create by oldboy
+       define hostextinfo {
+               host_name           180-lnmp-1
+               action_url          /nagios/pnp/index.php?host=$HOSTNAME$
+       }
+       如果host_name项有多个主机，可用逗号隔开
+       方法2：直接在hosts.cfg里加参数
+       action_url   /nagios/pnp/index.php?host=$HOSTNAME$
+       vim hosts.cfg
+       define host{
+               use            linux-server
+               host_name      08-client01
+               alias          08-client01
+               address        10.0.0.8
+               action_url     /nagios/pnp/index.php?host=$HOSTNAME$
+       }或者
+       vim templates.cfg
+       define host {
+               name            linux-server
+               ...
+               action_url     /nagios/pnp/index.php?host=$HOSTNAME$
+               }
+       /etc/init.d/nagios reload
+       或者
+       define service {
+               use                       generic-service
+               host_name                 08-client01.07-client02
+               service_description       Disk Partition
+               check_command             check_nrpe!check_disk
+               action_url                /nagios/pnp/index.php?host=$HOSTNAME$&srv=$SERVICEDESC$   
+       }
+       /etc/init.d/nagios reload
+       检查语法并重新加载nagios
+       /etc/init.d/nagios reload
+       可以看到如下图形：
+       图中，黑笔标记的。可以点击进去查看，主机所有的服务图
+       自定义的插件出图
+       出图的图像数据存放路径
+       ls /usr/local/nagios/share/perfdata/
+   第五部分 报警方式及生产报警策略
+   5.5.1 报警的种类及报警方式选用
+   5.5.1.1 报警的种类
+      1）邮件报警：这个大家都知道的，在生产环境应尽量使用自己公司的信箱作为报警信箱，或建立一个邮件组(邮件列表
+      )，如sa@etiantian.org.尽量不用非公司邮箱作为报警信箱，如126，qq，信箱，因为这些信箱都是免费的，对报警的频率等都会有限制，很可能会拒收收件或当垃圾邮件，导致收到报警延迟或无法收到，重要且不紧急的业务报警。
+      2）飞信转短信报警：需要WIN32上装个飞信客户端，把对方手机加为好友（需要对方确认），然后就可以给对方发短信了。我们可以再nagios服务器上安装一个飞信客户端,把对方手机加为好友(需要对方确认)，然后就可以给对方发短信了，我们可以再nagios服务器上安装一个飞信的客户端，然后通过这个客户端给账号里的好友发短信，不推荐使用
+      3）邮件转短信报警：如139,126,189，信箱里邮件到达后，通过手机通知收件人是邮箱提供商提供的一个功能。报警内容长度还有限制。
+      4）http短信网关:使用时的地址如下:
+      http://s.ccme.cc/qxt/send.jsp?circle=oldboy&pwd=oldboy123&mobile=$CONTACT&service=gg40-3gg0524clf88d&
+      msgid=23224&message=$TITLE[${alert_date} sa]
+      有专门的公司提供直接发给信息到手机的短信网关，常用的报警就是一个url地址携带信息。收短信费，推荐使用给方式
+      5）购买短信猫:类似手机终端一样的客户端硬件设备，实现报警，早期报警选用的一个方式，收短信费用
+      6）电话语音报警：在报警时直接电话给报警负责人
+      7）MSN QQ，微信及时通讯报警：模拟QQ，MSN发消息的功能，网友们开发了程序，从命令行执行程序利用MSN，QQ协议，直接发给MSN和QQ好友。
+      8）声音报警：值班人员想睡觉，通过声音提醒报警，通过将国歌设置为报警声音，一报警就播放国歌
+  5.1.3生产环境使用哪种报警？
+       在生产环境中，一般会根据业务的紧急程度不同，多个报警策略结合使用，对于不需要紧急处理的业务一般选择邮件报警，如内存，磁盘空间的剩余率，对于重要且紧急的业务，会使用邮件加上短信同时报警，使用邮件报警便于记录故障详细信息，短信报警是及时提醒，短信的有点是及时，而邮件报警如果人不再电脑旁边就没办法知晓了。
+       短信报警的缺点是报警内容有限，所以在工作中如果接到严重报警时，我们在紧急处理之前也会开启邮件系统先查看邮件细节。
+       邮件和短信报警是当前监控报警的两大主题。
+       其中http短信网关是比较好的短信报警方式(生产环境中推荐使用)。原因
+       1）  简单，易用
+       2）  稳定，可靠
+       3）  收费合理
+       化一定的费用，把业务做到最好，是工作的思维，如果总想着免费，那么如果业务报警报不出来，损失可能会更大，所以选择报警产品，和领导说清楚利弊，让他们去选择，这样即使没选，出问题了，也不都是你的责任，当然，如果业务不是特别重要，或者对你选择的免费产品有信心不会出问题，你也可以尝试，但这不推荐，正规的公司的业务报警应尽量选择可靠的报警。
+       最可靠的报警方式值班人员7*24 3班倒
+   5.1.4 故障报警分级
+       运维工程师值班职责(摘录)
+       第一条值班报警(故障)分类:
+       A类：磁盘空间,CPU,内存报警灯为一般报警，运维内部采取常规处理方式。
+       B类：网站域名不能打开为严重报警，需协调技术部相关人员会诊处理。
+       服务宕机
+       第二条：值班配有两部值班收集，遇运维问题将报警
+       若收到A类报警，原则上不限制处理时间，但以不影响服务为前提，进行及时处理
+       若收到B类报警短信，值班人员需要10分钟内邮件周知运维全体同事及相关技术人员，并解决，纯值班人员可能没有处理权限，只能电话及邮件周知运维人员。有的公司根据业务分配好报警的人
+   5.1.5 7*24 值班在线值守
+      上面我们讲解的是中小公司无7*24在线值守的情况下的报警及策略，对于一些游戏公司或者门户网站或者较大公司，如阿里巴巴，蓝汛，人人网等，还会有专职的值班人员进行7*24小时监控职守(查看nagios,cacti,mrtg,hyperic等界面)，一旦发生问题，由值班人员进行简单的判断并报警给相关负责人解决，7*24小时监控，需要额外增加人力成本。一般中小公司采用的不多
+      一般有7*24在线值守的情况，可以不用短信报警，可能声音报警就更好了，例如网友说的，有时候总想迷瞪一会，然后配好监控-报警就调用升国旗。不过监控运维不是长久的工作。
+   5.5.2 实战报警细节
+   5.5.1.1 普通邮件报警
+       普通邮件报警，就是在故障发生或者恢复时，通过邮箱报警到系统管理员或相关维护人员邮箱中，一般来说邮箱最好为公司邮箱，在读者线下学习时如果用QQ,126等邮箱可能会收不到邮件的情况或者被当作垃圾邮件了。
+   5.5.1.2 邮件报警适合的服务
+       一般白天上班时，邮件报警还算比较及时，但是如果人不在电脑旁(开会，休息时)，邮件报警就不行了，因此，单独用于邮件报警的一般不是特别重要的业务，或者作为接受大量信息报警内容时的一个辅助的报警方式，如硬盘，内存，及日志相关等不需要及时解决的服务报警，在生产环境中，邮件报警一般会结合其他报警方式同时使用，作为一个故障详细的记录工具
+   5.5.1.3 邮件报警的基本配置方法
+       来自1.7添加监控的接受email地址
+       vim /usr/local/nagios/etc/objects/contacts.cfg +35 修改如下行
+       email          nagios@localhost
+       修改为：
+       email          286937899@qq.com
+       #2 快速修改方法：sed -i 's#naigos@localhost#286937899@qq.com#' /usr/local/nagios/etc/objects/contacts.cfg
+       保存退出
+       #提示
+       #1.此功能依赖本机的sendmail服务，可执行service sendmail start开启
+       也可以用其他邮件服务器
+       /etc/init.d/sendmail start
+       netstat -lnt | grep 25
+       如果sendmail启动比较慢，可以修改/etc/hosts
+       #Do not remove following line, or various programs
+       #that require network functionality will fail
+       127.0.0.1             nagios-server localhost.localdomain localhost #增加主机名hostname结果oldboy
+       默认的报警配置在command.cfg里
+       # 'notify-host-by-email' command definition
+       define command{
+               command_name    notify-host-by-email
+              command_line    /usr/bin/printf "%b" "***** Nagios *****\n\nNotification Type: $NOTIFICATIONTYPE$\nHost: $HOSTNAME$\nState: $HOSTSTATE$\nAddress: $HOSTADDRESS$\nInfo: $HOSTOUTPUT$\n\nDate/Time: $LONGDATETIME$\n" | /bin/mail -s "** $NOTIFICATIONTYPE$ Host Alert: $HOSTNAME$ is $HOSTSTATE$ **" $CONTACTEMAIL$
+              }
+
+      # 'notify-service-by-email' command definition
+      define command{
+              command_name    notify-service-by-email
+              command_line    /usr/bin/printf "%b" "***** Nagios *****\n\nNotification Type: $NOTIFICATIONTYPE$\n\nService: $SERVICEDESC$\nHost: $HOSTALIAS$\nAddress: $HOSTADDRESS$\nState: $SERVICESTATE$\n\nDate/Time: $LONGDATETIME$\n\nAdditional Info:\n\n$SERVICEOUTPUT$" | /bin/mail -s "** $NOTIFICATIONTYPE$ Service Alert: $HOSTALIAS$/$SERVICEDESC$ is $SERVICESTATE$ **" $CONTACTEMAIL$
+              }
+      templates.cfg中有关邮件报警的联系人模版配置【默认已配置，如果配置飞信，MSN等要追加命令】
+      define contact{ 
+              name                            generic-contact  #在contact.cfg文件中被调用的
+              service_notification_period     24x7                    
+              host_notification_period        24x7                    
+              service_notification_options    w,u,c,r,f,s             
+              host_notification_options       d,u,r,f,s               
+              service_notification_commands   notify-service-by-email #定义了发邮件的命令，调用command.cfg文件中定义发送邮件的命令
+              host_notification_commands      notify-host-by-email
+              register                        0 
+    5.2.1.4生产环境邮件报警配置 
+        vim commands.cfg
+        # 'notify-host-by-email' command definition
+        define command{
+                command_name    notify-host-by-email
+                command_line    /usr/bin/printf "%b" "***** Nagios *****\n\nNotification Type: $NOTIFICATIONTYPE$\nHost: $HOSTNAME$\nState: $HOSTSTATE$\nAddress: $HOSTADDRESS$\nInfo: $HOSTOUTPUT$\n\nDate/Time: $LONGDATETIME$\n" | /bin/mail -s  “Host $HOSTSTATE$Alert for$HOSTNAME$!" $CONTACTEMAIL$
+                }
+        #主机报警内容标题： Host DOWN alter for 162-lamp-1
+        # 'notify-service-by-email' command definition
+        define command{
+                command_name    notify-service-by-email
+                command_line    /usr/bin/printf "%b" "***** Nagios *****\n\nNotification Type: $NOTIFICATIONTYPE$\n\nService: $SERVICEDESC$\nHost: $HOSTALIAS$\nAddress: $HOSTADDRESS$\nState: $SERVICESTATE$\n\nDate/Time: $LONGDATETIME$\n\nAdditional Info:\n\n$SERVICEOUTPUT$" | /bin/mail -s "$HOSTALIAS$/$SERVICEDESC$ is $SERVICESTATE$ **" $CONTACTEMAIL$
+                }
+        #服务报警的邮件的标题：162-lamp-1/http_80 is CRITICAL
+    5.2.1.5邮件转短信报警
+        这里的服务提供商目前很多，如126，139，189等信箱都支持
+        配置方法和邮件报警一样，只不过在注册信箱后要开启邮箱邮件到达短信提醒的功能（设置白名单）。邮件转短信报警的稳定性一般，且信息的容量有很大限制，因此，建议作为辅助报警方式。
+    5.2.1.6联系人分级报警生产策略
+        来自3.6 contacts.cfg生产库实战配置例子写法
+        #手机短信用户
+        define contact{
+                contact_name      shouji_jeacen
+                use               generic-contact
+                alias              nagios admin
+                email             134521902211@139.com
+              }
+       define contact{
+               contact_name      shouji_wodi
+               use               generic-contact
+               alias              nagios admin
+               email             13452222211@139.com
+              }
+
+       #邮件用户及msn帐号
+       define contact{
+               contact_name      msn_fish
+               use               generic-contact
+               alias             nagios admin
+               email             134521211@139.com
+               address1          rr@hotmail.com
+               }
+      define contact{
+              contact_name      msn_fish2
+              use               generic-contact
+              alias             nagios admin
+              email             1345212231@139.com
+              address1          rsdfds@hotmail.com
+              }
+
+      #仅仅是邮件用户
+      define contact{
+              contact_name      youjian_fish
+              use               generic-contact
+              alias              nagios admin
+              email             134521211@139.com，linkageinfo@126.com
+              }
+      define contact{
+              contact_name      youjian_fish2 
+              use               generic-contact
+              alias             nagios admin
+              email             134521211@139.com，linkageitest@126.com
+              }
+
+      #手机组，手机组包含上面的两个手机成员
+      define contactgroup{
+              contactgroup_name     shoujiusers
+              alias                 nagios administrator
+              members               shouji_jeacen, shouji_wodi
+             }
+
+      #邮件及msn帐号组
+      define contactgroup{
+              contactgroup_name     msnusers
+              alias                 nagios administrator
+              members               youjian_fish, msn_fish2
+             }
+
+      #仅邮件组
+      define contactgroup{
+              contactgroup_name    msnusers
+              alias                nagios administrator
+              members              youjian_fish, youjian_fish2 
+             }
+   5.2.1.7 正确的报警思想
+          工作中的报警需要遵循一个原则“该报警的一定要报出来，不该报警的就一定不要报出来”
+   5.3    飞信软件的报警
+          飞信报警的实现原理是：首先在个人电脑上（非报警服务器）装个飞信客户端，然后注册一个用于报警的发送人帐号。需要绑定手机，然后，登录飞信客户端，把需要接受报警的所有手机加为好友（需要对方确认），然后就可以使用发送人帐号给对方发短信了，服务器报警使用其命令行模式的发送方式。
+   5.3.1  飞信软件报警配置过程细节
+   5.3.1.1 本地上传飞信包（也可以网上下载）
+           飞信机器人程序地址：http://bbs.it-adv.net
+   5.2.1.4 MSN软件报警
+           MSN报警的实现原理是：首先在个人电脑上（非报警服务器）装个MSN客户端，然后注册一个用于报警MSN发送人帐号，然后，登录MSN客户端，把需要接收报警的所有MSN帐号加为好友（需要对方确认），然后就可以使用MSN发送人帐号给所有指定MSN好友发送报警信息了。服务器的MSN报警使用其命令行模式的发送方式，即程序方式发送MSN消息。
+   5.2.1.5 MSN软件报警配置过程细节
+   5.2.1.5.1安装phpmsnclass软件
+   5.2.1.6 http短信网关接口报警
+           经过多年的对nagios报警的使用，最为推荐的是http短信网关接口，有专门的公司提供直接发给信息到手机的短信网关，常用的报警就是一个url地址携带信息。
+           推荐原因：
+           1）  收费合理，报警比较及时服务有保证
+           2）  配置简单，一个脚本搞定
+           还有很多公司为了省钱，使用139和飞信等短信报警方式，这个是不推荐的。当购买短信服务后，除了有界面可以发送报警（一般市场人员用）外，还会有一个url地址，地址后面携带帐号，密码，及报警信息。url地址如下面的形式：
+           http://s.ccme.cc/qx/send.jsp?circle=fish%pwd-fish123&mobile=$CONTACT&
+           service=abcd546-eee6-gg69-gg40-3gg0524clf88d%msgid=2322&message=$TITLE[${alert_date}sa]
+           在这个地址中信息如下表：
+           用户名    验证密码     目标手机               消息内容
+           fish      fish123      $CONTACT,脚本变量      $TITLE[${alert_date} sa]
+                                                         ,消息变量及时间变量
+           实际发送命令演示：
+           #curl 方式  
+           curl -d cdkey-3RTV-EMY-0980-MTUQ2 -d password=189162 -d phone=$CONTACT -d message=” $TITLE[${alert_date} fishsa]”http://sdkhttp.eucp.b2m.cn/sdkproxy/sendsms.action
+
+           wget --quiet “http://s.ccme.cc/qxt/send.jsp?circle=159net_131&pwd=fish&mobile=1891178221&service=f1fb0546-ebb6-0987-8f20-560524c1f88d&msgid=395672d&message=$TITLE[${alert_date} fishsa n]”
+   5.2.1.7 短信网关设备报警细节（在监控服务器上）
+           1）开发报警脚本sms_send防与libexec下面，授权755
+           vim /usr/local/nagios/libexec/sms_send
+           #!/bin/sh
+           PROGNAME=`basename $0`
+           PROGPATH=`echo $0 | sed -e 's,[\\/][^\\/][^\\/]*$,,'`
+           print_usage() {
+             echo "Usage:"
+             echo "/bin/sh $PROGNAME title contact"
+             exit 1
+             }
+           if [ $# -ne 2 ];then
+             print_usage
+           fi
+           alter_date=$(date +%y-%m-%d" "%H:%M)
+           TITLE=$1  #PROMT "Host $HOSTSTATE$ alter for $HOSTNAME$"
+           CONTACT=$2 #手机号
+           #curl mode
+           curl "http://221.179.131.90/.smapi.php?phone=$CONTACT&cid=12323&pass=024e5XXXXX2aofxxxxxxe1&msg=$TITLE"
+           #curl -d cdkey-3RTV-EMY-0980-MTUQ2 -d password=189162 -d phone=$CONTACT -d message=?$TITLE[${alert_date} fishsa]"  http://sdkhttp.eucp.b2m.cn/sdkproxy/sendsms.action
+           #wget ----quiet http://s.ccme.cc/qxt/send.jsp?circle=159net_131&pwd=fish&mobile=1891178221&service=f1fb0546-ebb6-0987-8f20-560524c1f88d&msgid=395672d&message=$TITLE[${alert_date} fishsa n]
+           chmod +x sms_send
+           测试脚本：
+           ./sms_send "this is a test" 13451902202
+           2)在command.cfg中定义报警命令
+           #command.cfg
+           # ‘notify-host-by-pager’ command definition
+           define command{
+                   command_name    notify-host-by-pager
+                   command_line    $USER1/sms_send “Host $HOSTSTATE$ alter for $HOSTNAME$” $CONTACTPAGER$ 
+                   }
+
+           # ‘notify-host-by-pager’ command definition
+           define command{
+           command_name    notify-service-by-pager
+           command_line    $USER1/sms_send “$HOSTALIAS$/$SERVICEDESC$ is $SERVICESTATE$” $CONTACTPAGER$ 
+           }
+           3)在模版templates.cfg中增加如下配置
+           define contact{
+                   name                            generic-contact         
+                   service_notification_period     24x7                    
+                   host_notification_period        24x7                    
+                   service_notification_options    w,u,c,r,f,s             
+                   host_notification_options       d,u,r,f,s               
+                   service_notification_commands   notify-service-by-email,notify-host-by-pager
+                   host_notification_commands      notify-host-by-email,notify-service-by-pager
+                   register                        0                       
+                   }
+           4）在联系人contact.cfg里做如下联系人定义
+           define contact {
+                    contact_name      oldboy-pager
+                    use               generic-contact
+                    alias             Nagios users
+                    pager             18901398229
+                   }
+           define contactgroup{
+                    contactgroup_name       admins
+                    alias                   Nagios Administrators
+                    members                 nagiosadmin,oldboy-pager
+                   }
+      5.3  批量生成nagios的services.cfg配置文件
+                  cat host.list
+                  lvs-01        10.0.10.1
+                  lvs-02        10.0.10.2
+                  mysql-01      10.0.10.3
+                  mysql-02      10.0.10.4
+                  web-01        10.0.10.5
+                  web-02        10.0.10.6
+
+                  cat product_nagios_service.sh
+                  #!/bin/bash
+                  #
+                  HOSTPATH="/usr/local/nagios/etc/objects/service"
+                  >tmp.host
+                  exec <host.list
+                  i=1
+                  while read line
+                    do
+                      if [ $i -eq 6 ]; then
+                        echo -n "`echo $line|awk '{print $1}'`" >>tmp.host
+                      else
+                        echo -n "`echo $line|awk '{print $1}'`", >>tmp.host
+                      fi
+                      ((i++))
+                   done
+                   members=`head -1 tmp.host`
+                   >$HOSTPATH/url.cfg
+                   for SERVICENAME in load mem iostat swap disk
+                   do
+                     cat >>$HOSTPATH/$SERVICENAME.cfg<<EOF
+                     ##################################################################
+                     # service DEFINITION BY WPACCP AT 20161126                       #
+                     #                                                             #
+                     ##################################################################
+                    define service {
+                            use                   generic-$SERVICENAME-service
+                            host_name             $members
+                            }
+                    EOF
+                    done
+      5.4 批量生成nagios的hosts.cfg配置文件
+                    #!/bin/bash
+                    HOSTFILE="/usr/local/nagios/etc/objects"
+                    cat >$HOSTFILE/hosts.cfg<<EOF
+                    ########################################
+                    # HOST FEFINITION BY OLD1BOY AT 20121016
+                    #
+                    ########################################
+                    EOF
+                    exec <host.list
+                    while read line
+                    do
+                          echo "#host:`echo $line|awk '{print $1}'`|ip:`echo $line|awk '{print $2}'`" >>$HOSTFILE/hosts.cfg
+                          echo 'define host {' >>$HOSTFILE/hosts.cfg
+                          echo 'use                             linux-server' >>$HOSTFILE/hosts.cfg
+                          echo "host_name                       `echo $line|awk '{print $1}'`" >>$HOSTFILE/hosts.cfg
+                          echo "alias                           `echo $line|awk '{print $1}'`" >>$HOSTFILE/hosts.cfg
+                          echo "address                         `echo $line|awk '{print $2}'`" >>$HOSTFILE/hosts.cfg
+                          echo "}" >>$HOSTFILE/hosts.cfg
+                          echo >>$HOSTFILE/hosts.cfg
+                    done
+                    >tmp.host
+                    exec <host.list
+                    i=1
+                    while read line
+                    do 
+                          if [ $i -eq 6 ]; then
+                            echo -n "`echo $line|awk '{print $1}'`" >>tmp.host
+                          else
+                            echo -n "`echo $line|awk '{print $1}'`", >>tmp.host
+                          fi
+                          ((i++))
+                    done  
+                    members=`head -1 tmp.host`
+                    cat >>$HOSTPATH/hosts.cfg<<EOF
+                     ###############################################################
+                     # HOST FEFINITION BY OLD1BOY AT 20121016
+                     #                                                             #
+                     ##################################################################
+                     define hostgroup{
+                             hostgroup_name        linux-servers
+                             alias                 Linux Servers
+                             members               $members
+                            }
+                     EOF
+                  
+      5.5 批量生成nagios的contact.cfg配置文件         
+                    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+          
+
+
+
+
+
+
+                  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
