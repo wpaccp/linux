@@ -1,0 +1,107 @@
+                                   linux awk命令详解 
+1.1 什么是awk
+    awk是行处理器: 相比较屏幕处理的优点，在处理庞大文件时不会出现内存溢出或是处理缓慢的问题，通常用来格式化文本信息,awk处理过程: 依次对每一行进行处理，然后输出
+1.2 awk的命令格式和参数
+    awk命令形式:
+    awk [-F|-f|-v] ‘BEGIN{} //{command1; command2} END{}’ file
+    [-F|-f|-v]   
+    awk的参数详解
+    参数名                     功能详解
+    -F：                       指定分隔符，
+    -f：                       调用脚本，
+    -v：                       定义变量 var=value
+    ' '：                      引用代码块
+    BEGIN：                    初始化代码块，在对每一行进行处理之前，初始化代码，
+                               主要是引用全局变量，设置FS分隔符
+     //                        匹配代码块，可以是字符串或正则表达式
+     {}                        命令代码块，包含一条或多条命令
+     ；                        多条命令使用分号分隔
+    END                        结尾代码块，在对每一行进行处理之后再执行的代码块，
+                               主要是进行最终计算或输出结尾摘要信息
+    $0                         表示整个当前行
+    $1                         每行第一个字段
+    NF                         字段数量变量
+    NR                         每行的记录号，多文件记录递增
+    FNR                        与NR类似，不过多文件记录不递增，每个文件都从1开始
+    \t                         制表符
+    \n                         换行符
+    FS                         BEGIN时定义分隔符
+    RS                         输入的记录分隔符， 默认为换行符(即文本是按一行一行输入)
+    ~                          匹配，与==相比不是精确比较
+    !~                         不匹配，不精确比较
+    ==                         等于，必须全部相等，精确比较
+    !=                         不等于，精确比较
+    &&　                       逻辑与
+    ||                         逻辑或
+    +                          匹配时表示1个或1个以上
+    /[0-9][0-9]+/              两个或两个以上数字
+    /[0-9][0-9]*/              一个或一个以上数字
+    FILENAME                   文件名
+    OFS                        输出 字段分隔符， 默认也是空格，可以改为制表符等
+    ORS                        输出的记录分隔符，默认为换行符,
+                               即处理结果也是一行一行输出到屏幕
+    -F'[:#/]'                  定义三个分隔符
+
+1.3 例子：
+    1)显示GID大于500的组
+    awk -F : '$3>500{print $1}' /etc/group
+    awk 'BEGIN{FS=":";OFS=":"}$3>500{print $1}' /etc/group
+    2)显示默认的SHELL的值为nologin的用户
+    awk '$7=="/sbin/nologin"{print $1}' /etc/passwd
+    awk '$7~/nologin$/{print $1}' /etc/passwd
+    3)显示eth0中的网卡的配置信息，只显示等号后的值
+    awk -F = '{print $2}' /etc/sysconfig/network-scripts/ifcfg-eth0
+    4)显示/etc/sysctl.conf文件中定义的内核的参数 只显示名字
+    awk -F = '{print $1}' /etc/sysctl.conf
+    awk '!/^#|^$/ {print $1}' /etc/sysctl.conf
+    awk '/^#[:space:]]/{print$1}' /etc/sysctl.conf
+    5)显示网卡的IP地址
+    ifconfig eth0 | awk -F ':| +' '/addr:/{print $4}'
+    ifconfig eth0 | awk -F "[ :]+" '/inet addr:/ {print $4}'
+    ifconfig eth0 | awk -F "[ :]+" '/inet / {print $4}'
+    ifconfig eth0 | awk -F "[ :]+" '/inet a/ {print $4}'
+    ifconfig eth0 | head -2 |awk -F "[ :]+" '/ addr:/ {print $4}'
+    ifconfig eth0 | grep inet addr: | awk -F : '{print $2}'
+    6)显示当前系统LISTEN和CONNECTED总的连接数
+    netstat -an | awk 'BEGIN{count=0}$6 ~/LISTEN|CONNECTED/{count=count+1} END {print count}'
+    7)分组显示当前系统LISTEN和CONNECTED总的连接数
+    netstat -an | awk '$6 ~/LISTEN|CONNECTED/{count[$6]++} END{for(i in count) print i  ,count[i]}'
+    netstat -an | grep tcp | awk '{if($6=="LISTEN"){i++} else if($6=="ESTABLISHED"){j++}}END{print i?i:0,j?j:0,i+j}'
+    8)显示当前目录下的文件总数
+    ls -l | awk 'BEGIN{count=0;print $0}!/^d/{count++} END{print count}'
+    9)显示当前目录下文件总的容量
+    ls -l | awk 'BEGIN{count=0;print $0}!/^d/{count=count+$5} END{print count}'
+    10)显示/etc/passwd文件中账户的总数量
+    awk 'BEGIN{count=0}{count++} END{print "totoal number:" count}' /etc/passwd
+    11)显示/etc/passwd文件中限制登录账户的总数量
+    awk -F ":" 'BEGIN{count=0}{if($7=="/sbin/nologin") count++} END{print "total number:"count}' /etc/passwd
+    12)统计网站访问返回码200,404,500的总数
+    tac /www/log/host.access.log|awk -F "[ ':']" '$12 ~/200|404|500/{count[$12]++}END{for(i in count) print i,count[i]}'
+    cat /www/log/host.access.log | awk -F "[ ':']" {if($12=="200"){i++} else if($12=="404"){j++} else if($12==500){k++}}END{print i?i:0,j?j:0,k?k:0,i+j+k}
+    13)判断磁盘的利用率，大于20则给出警告
+    df -Th |awk -F[%] '/^\/dev\/(sd|ma).*/{print $1}' |awk '{if($NF>=20){printf "Warning,%s usage has %d\n",$1,$NF} }
+    14)判断uid是否大于等于500，是则为普通用户，否则为root或系统用户
+    awk -F: '{if($3>=500){printf "Common User: %-15s,uid %d\n",$1,$3} else {printf "Root or Sysuser: %-15s,uid %i\n",$1,$3}}' /etc/passwd
+    15)统计/etc/grub2.cfg文件中以linux16（前面可跟任意个空格）开头的行的每一个单词的
+    字符数
+    ]#awk '/^[[:space:]]*linux16/{num=1;while(num<=NF){print $num,length($num);num++}}' /etc/grub2.cfg
+    16)统计/etc/grub2.cfg文件中以linux16（前面可跟任意个空格）开头的行，只显示字符数
+    大于等于7的单词
+    #awk '/^[[:space:]]*linux16/{n=1;while(n<=NF){if(length($n)>=7){print $n,length($n)}n++}}' /etc/grub2.cfg
+    17)取出id号为奇数的用户名
+    #awk -F: '{if($3%2==0){next}else{print $1,$3}}' /etc/passwd
+    18)统计/etc/fstab文件中每个文件类型出现的次数
+    cat /etc/fstab | awk '!/^#/&&!/^$/{fstype[$3]++}END{for(i in fstype){print i,fstype[i]}}'
+    19)统计远程连接到当前主机的ip数
+    netstat -tan | awk '/^tcp\>/{split($5,ip,":");ip_count[ip[1]]++}END{for(i in ip_count) print i,ip_count[i]}'
+    20)将/etc/passwd中root用户的用户名替换为superman
+    awk -F: 'sub(/^root\>/,"superman",$1)' /etc/passwd
+    21)将/etc/fstab中ext4的文件类型替换为xfs
+    awk 'sub(/ext4/,"xfs",$3)' /etc/fstab
+    
+
+
+
+
+
+
