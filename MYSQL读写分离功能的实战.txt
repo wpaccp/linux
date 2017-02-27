@@ -1,0 +1,261 @@
+                               MYSQL读写分离功能的实战
+                                  (一):(amoeba篇)
+  1.1 下载和安装JDK
+      wget http:/www.oracle.com/technetwork/java/javase/downloads/jdk7-downloads-1880260.html
+  1.1.1 配置授权用户,分别在主\从服务器上添加一个授权用户amoeba
+        mysql -uroot -poldboy123 -S /data/3306/mysql.sock
+        mysql> grant select,insert,update,delete on *.* to amoeba@'192.168.100.%' identified by 'redhat';
+        mysql> flush privileges; 
+        如果开启了主从同步后，这时当主服务器创建一个用户后会同步到从服务器，
+        所以我们要在从服务器上删除主服务器建立的用户后，再新建用户
+         mysql -uroot -poldboy123 -S /data/3307/mysql.sock
+         mysql> delete from mysql.user where user='amoeba';
+         mysql> grant select on *.* to amoeba@'192.168.100.%' identified by 'redhat';
+         mysql> flush privileges;
+         mysql> quit
+  1.1.2 配置JDK功能
+         rpm -ivh jdk-7u45-linux-x64.rpm
+         ln -s /usr/java/jdk1.7.0_45/ /usr/java/jdk1.7
+         vim /etc/profile
+         export PATH=/application/mysql/bin:$PATH
+         export JAVA_HOME=/usr/java/jdk1.7
+         export PATH=$JAVA_HOME/bin:$JAVA_HOME/jre/bin:$PATH
+         source /etc/profile
+         java -version
+         java version "1.7.0_45"
+         Java(TM) SE Runtime Environment (build 1.7.0_45-b18)
+         Java HotSpot(TM) 64-Bit Server VM (build 24.45-b08, mixed mode)
+   1.1.3 下载和安装amoeba
+         mkdir /usr/local/amoeba
+         cd /usr/local/amoeba
+         wget https://jaist.dl.sourceforge.net/project/amoeba/Amoeba for mysql/amoeba-mysql-1.3.1-BETA.zip
+         unzip amoeba-mysql-1.3.1-BETA.zip
+         rm -rf amoeba-mysql-1.3.1-BETA.zip
+         cd conf /
+         cp amoeba.xml amoeba.xml.ori
+         使用VIM命令修改amoeba.xml配置文件内容如下
+         vim amooeba.xml
+         ------------------------------------
+         <?xml version="1.0" encoding="gbk"?>
+<!DOCTYPE amoeba:configuration SYSTEM "amoeba.dtd">
+<amoeba:configuration xmlns:amoeba="http://amoeba.meidusa.com/">
+
+  <server>
+      
+    <property name="port">3306</property>
+          <property name="ipAddress">192.168.100.51</property>
+    <property name="readThreadPoolSize">20</property>
+    <property name="clientSideThreadPoolSize">30</property>
+    <property name="serverSideThreadPoolSize">30</property>           
+    <property name="netBufferSize">128</property>
+    <property name="tcpNoDelay">true</property>
+    <property name="user">root</property>
+    <property name="password">mysql</property>
+    <property name="queryTimeout">60</property>
+                          </server>
+                          <connectionManagerList>
+            <connectionManager name="defaultManager" class="com.meidusa.amoeba.net.MultiConnectionManagerWrapper">
+                <property name="subManagerClassName">com.meidusa.amoeba.net.AuthingableConnectionManager</property>
+                <!-- 
+           default value is avaliable Processors 
+          <property name="processors">5</property>
+                                              -->
+       </connectionManager>
+         </connectionManagerList>
+         <dbServerList>
+             <dbServer name="server1">
+                 <factoryConfig class="com.meidusa.amoeba.mysql.net.MysqlServerConnectionFactory">
+                 <property name="manager">defaultManager</property>
+                 <property name="port">3306</property>
+                 <property name="ipAddress">192.168.100.50</property>
+           <property name="schema">test</property>
+           <property name="user">amoeba</property>                                                   
+           <property name="password">redhat</property>
+           </factoryConfig>
+
+                 <poolConfig class="com.meidusa.amoeba.net.poolable.PoolableObjectPool">
+                     <property name="maxActive">200</property>
+                     <property name="maxIdle">200</property>
+                     <property name="minIdle">10</property>
+                     <property name="minEvictableIdleTimeMillis">600000</property>
+                     <property name="timeBetweenEvictionRunsMillis">600000</property>
+                     <property name="testOnBorrow">true</property>
+                     <property name="testWhileIdle">true</property>
+                 </poolConfig>
+             </dbServer>
+             <dbServer name="server2">
+                 <factoryConfig class="com.meidusa.amoeba.mysql.net.MysqlServerConnectionFactory">
+                 <property name="manager">defaultManager</property>
+                 <property name="port">3307</property>
+                 <property name="ipAddress">192.168.100.50</property>
+           <property name="schema">test</property>
+           <property name="user">amoeba</property>                                                         
+           <property name="password">redhat</property>
+           </factoryConfig>
+
+                 <poolConfig class="com.meidusa.amoeba.net.poolable.PoolableObjectPool">
+                     <property name="maxActive">200</property>
+                     <property name="maxIdle">200</property>
+                     <property name="minIdle">10</property>
+                     <property name="minEvictableIdleTimeMillis">600000</property>
+                     <property name="timeBetweenEvictionRunsMillis">600000</property>
+                     <property name="testOnBorrow">true</property>
+                     <property name="testWhileIdle">true</property>
+                 </poolConfig>
+             </dbServer>
+             <dbServer name="master" virtual="true">
+                 <poolConfig class="com.meidusa.amoeba.server.MultipleServerPool">
+                     <property name="loadbalance">1</property>
+         <property name="poolNames">server1</property>
+     </poolConfig>
+      </dbServer>
+             <dbServer name="slave" virtual="true">
+                 <poolConfig class="com.meidusa.amoeba.server.MultipleServerPool">
+                     <property name="loadbalance">1</property>
+         <property name="poolNames">server2</property>
+     </poolConfig>
+      </dbServer>
+       </dbServerList>
+
+       <queryRouter class="com.meidusa.amoeba.mysql.parser.MysqlQueryRouter">
+            <property name="ruleConfig">${amoeba.home}/conf/rule.xml</property>
+            <property name="functionConfig">${amoeba.home}/conf/functionMap.xml</property>
+            <property name="ruleFunctionConfig">${amoeba.home}/conf/ruleFunctionMap.xml</property>
+            <property name="LRUMapSize">1500</property>
+            <property name="defaultPool">master</property>
+            <property name="writePool">master</property>
+            <property name="readPool">slave</property>
+            <property name="needParse">true</property>
+      </queryRouter>
+</amoeba:configuration>
+----------------------------------------------------------------------------------
+  1.4 启动amoeba服务器
+      chmod -R 700 /usr/local/amoeba/bin
+      /usr/local/amoeba/bin/amoeba &
+  1.5 常见故障汇总
+      故障1：当运行/usr/local/amoeba/bin/amoeba &命令时，显示如下故障现象
+      /usr/local/amoeba/bin/amoeba: line 14: uname:command not found
+      /usr/local/amoeba/bin/amoeba: line 37: dirname:command not found
+      The stack size specified is too small, Specify atleast 228k
+      Error: Could not create the Java Virtual Machine.
+      Error: A fatal exception has occurred. Program willexit.
+      解决方法：修改amoeba启动文件的57行的-Xss的值为256k
+      vim /usr/local/amoeba/bin/amoeba
+      ULT_OPTS="-server -Xms256m -Xmx256m-Xss256"
+      设置完成启动amoeba
+      /usr/local/amoeba/bin/amoeba &
+  1.5 测试读写分离
+      在从库上关闭主从复制
+      mysql> mysql -uroot -poldboy123 -S /data/3307/mysql.sock
+      mysql> slave stop;
+      建立一个数据库和表，对表进行插入数据操作，观察主库和从库的变化
+     mysql -uamoeba -predhat -h192.168.100.50
+     mysql> insert into oldboy.student(name) values('oldboy15')
+     mysql> insert into oldboy.student(name) values('oldboy13')
+     mysql> quit
+     mysql -uroot -poldboy123 -S /data/3306/mysql.sock
+     mysql> use oldboy
+     mysql> select * from student; #主库上的表记录查询
+     +----+----------+
+     | id | name     |
+     +----+----------+
+     |  1 | oldboy1  |
+     |  2 | oldboy1  |
+     |  3 | oldboy2  |
+     |  4 | oldboy3  |
+     |  5 | oldboy4  |
+     |  6 | oldboy5  |
+     |  7 | oldboy6  |
+     |  8 | oldboy7  |
+     |  9 | oldboy8  |
+     | 10 | oldboy9  |
+     | 11 | oldboy10 |
+     | 13 | oldboy11 |
+     | 14 | oldboy11 |
+     | 15 | oldboy12 |
+     | 16 | oldboy15 |
+     +----+----------+
+     mysql> select * from student; #从库上查询表记录
+     +----+----------+
+     | id | name     |
+     +----+----------+
+     |  1 | oldboy1  |
+     |  2 | oldboy1  |
+     |  3 | oldboy2  |
+     |  4 | oldboy3  |
+     |  5 | oldboy4  |
+     |  6 | oldboy5  |
+     |  7 | oldboy6  |
+     |  8 | oldboy7  |
+     |  9 | oldboy8  |
+     | 10 | oldboy9  |
+     | 11 | oldboy10 |
+     | 13 | oldboy11 |
+     | 14 | oldboy11 |
+     | 15 | oldboy12 |
+     | 16 | oldboy13 |
+     +----+----------+
+     测试的结论：如果配置正确，只能从主库上看到插入的记录，从库是无记录的
+
+     开启从库上的主从服务按钮
+     mysql> mysql -uroot -poldboy123 -S /data/3307/mysql.sock
+     mysql> slave start;
+     mysql> show slave status\G;
+     在主库插入一条记录
+     mysql -uamoeba -predhat -h192.168.100.50
+     mysql> insert into oldboy.student(name) values('oldboy13')
+     mysql> select * from oldboy.student;
+     +----+----------+
+     | id | name     |
+     |  1 | oldboy1  |
+     |  2 | oldboy1  |
+     |  3 | oldboy2  |
+     |  4 | oldboy3  |
+     |  5 | oldboy4  |
+     |  6 | oldboy5  |
+     |  7 | oldboy6  |
+     |  8 | oldboy7  |
+     |  9 | oldboy8  |
+     | 10 | oldboy9  |
+     | 11 | oldboy10 |
+     | 13 | oldboy11 |
+     | 14 | oldboy11 |
+     | 15 | oldboy12 |
+     | 16 | oldboy15 |
+     | 17 | oldboy13 |
+     +----+----------+
+     从库上查询从主库上同步的数据
+     mysql> use oldboy
+     mysql> select * from student;
+     +----+----------+
+     | id | name     |
+     +----+----------+
+     |  1 | oldboy1  |
+     |  2 | oldboy1  |
+     |  3 | oldboy2  |
+     |  4 | oldboy3  |
+     |  5 | oldboy4  |
+     |  6 | oldboy5  |
+     |  7 | oldboy6  |
+     |  8 | oldboy7  |
+     |  9 | oldboy8  |
+     | 10 | oldboy9  |
+     | 11 | oldboy10 |
+     | 13 | oldboy11 |
+     | 14 | oldboy11 |
+     | 15 | oldboy12 |
+     | 16 | oldboy13 |
+     | 17 | oldboy13 |
+     +----+----------+
+     测试结论：如果配置正确，从主库和从库上都能看到插入的记录 
+
+                          (二):(mysql.proxy篇)
+    
+
+                          
+
+
+
+         
+
+
