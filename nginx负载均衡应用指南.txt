@@ -1,0 +1,916 @@
+                            nginx负载均衡应用指南
+1.1 实验环境准备
+1.1.1 软硬件准备
+     (1)测试硬件准备
+     4台服务器，两台做负载均衡，两台做RS
+     +-----------------------------------------------+
+     |Hostname| IP            |  说明                |
+     +--------+---------------+----------------------+
+     |lb01    |10.0.0.7       |nginx主负载均衡服务器 |
+     +--------+---------------+----------------------+
+     |lb02    |10.0.0.9      |nginx辅助负载均衡服务器|
+     +--------+--------------+-----------------------+
+     |web01   |10.0.0.6      |apache web01服务器     |
+     +--------+--------------+-----------------------+
+     |web02   |10.0.0.8      |apache web02服务器     |
+     +--------+--------------+-----------------------+
+     (2)软件准备
+     系统centos6.5 x86_64
+     软件nginx-1.6.2.tar.gz(http://nginx.org/download/nginx-1.6.2.tar.gz)
+1.1.2 安装nginx软件
+     注意将在以上负载均衡的2台服务器上进行nginx的安装
+     完整安装见nginx应用指南文章
+     ./configure --user=nginx --group=nginx \
+     --prefix=/application/nginx-1.6.2 --with-http_stub_status_module \
+     --with-http_ssl_module --with-http_realip_module
+1.1.3 配置调试用于测试的web服务
+     注意：本小节操作只是以下nginx web 服务器节点操作：
+     +---------------------------------+
+     |RS01|10.0.0.17|nginx web01 服务器|
+     +---------------------------------+
+     |RS02|10.0.0.18|nginx web02 服务器|
+     +----+---------+------------------+
+1.1.4 nginx负载均衡服务器的安装
+       1)安装好nginx和keepalived
+1.1.4.1 实现一个简单的负载均衡
+       注意:本小节操作只是以下nginx lb01服务器节点操作:
+        +---------------------------------+
+        |RS01|10.0.0.17|nginx web01 服务器|
+        +---------------------------------+
+        一个简单的nginx的负载均衡的配置
+        vim /application/nginx/conf/nginx.conf
+        添加如下内容：
+        include extra/upstream01.conf
+
+        vim /application/nginx/conf/extra/upstream01.conf
+        添加如下内容
+        upstream blog_real_servers {
+             server 10.0.0.6:80 weight=5;
+             server 10.0.0.8:80 weight=10;
+             server 10.0.0.19.82 weight=15;
+        }
+        server {
+           listen     80;
+           server_name blog.etiantian.org;
+           location / {
+            proxy_pass http://blog_real_servers;
+           }
+        }
+1.2 upsream模块
+1.2.1 upstream 模块介绍
+     Nginx的负载均衡功能依赖于ngx_http_upstream_module模块，所支持的代理方式有proxy_pass,fastcgi_pass,memcached_pass.
+1.2.2 upstream 模块语法
+     (1)范例1：
+     #blog lb by oldboy at 20170302
+     upstream blog_real_servers {
+         server 10.0.0.17:80 weight=5;
+         server 10.0.0.18:80 weight=10;
+         server 10.0.0.19:82 weight=15;
+     }
+     (2)范例2：
+     upstream blog_server_pool {
+        server 10.0.10.15;
+        server 10.0.10.6:80 weight=1 max_fails=1 fail_timeout=10s;
+        #the server config above is the same.
+        server 10.0.10.7:80 weight=1 max_fails=2 fail_timeout=20s backup;
+        server 10.0.10.8:80 weight=1 max_fails=2 fail_timeout=20s backup;
+
+     }
+     (3)示例及解释：
+      upstream backend {
+         server backupend1.example.com weight=5;
+         #server是固定，后面可以接域名(门户会用)或IP.如果不加端口，默认是80端口，
+         weight代表权重，值越大被分配的几率越高；
+         server backend2.example.com:8080 #域名加端口，转发到后端的指定端口上；
+         server unix:/tmp/backend3; #指定socket文件
+         提示：Server如果接域名，需要内网有DNS服务器，或者在负载均衡器的hosts文件
+         做域名解析，Server后面还可以直接接IP或IP加端口
+         server 192.168.1.2;
+         server 192.168.1.3:8080;
+         server backup1.example.com:8080 backup;
+         #备份服务器，等上面指定的服务器都不可访问的时候会启用，backup的用法和Haproxy中用法一样
+         server backup2.example.com:8080 backup;
+      }
+         两台keepalived+http做高可用，那么这里使用nginx的backup参数就可以实现了
+1.2.3 upstream模块相关说明
+     1：upstream模块应放于nginx.conf配置的http{}标签内。
+     2: upstream模块默认算法是wrr(权重轮询weighted round-robin)
+     3: upstream模块内部部分参数说明。
+  +--------------------------------------------------------------------------+
+  |server 10.0.10.8:80|负载均衡后面的RS配置，可以是IP或域名，端口不写，默认是|
+  |                   |端口.高并发场景IP要换成域名,                          |
+  |                   |通过DNS做负载均能                                     |
+  +--------------------------------------------------------------------------+
+  |weight             |是权重，默认是1                                       |
+  +--------------------------------------------------------------------------+
+  |max_fails          |最大尝试失败的次数,默认为1,0表示禁止失败尝试.企业场景 |
+  |                   |2- 京东1次，蓝汛10次，根据业务需求去配置              |  
+  +-------------------+------------------------------------------------------+
+  |backup             |热备配置(RS节点的高可用),当前面激活                   |
+  |                   |的RS都失败后会自动启动热备RS                          |  
+  +-------------------+------------------------------------------------------+
+  |fail_timeout=20s   |失败超时时间,默认是10s.京东1次,蓝汛10次,              |  
+  |                   |根据业务需求去配置,京东3秒,蓝汛3秒,                   |
+  |                   |根据业务需求去配置.常规业务2-3秒                      |
+                      |合理                                                  |
+  +-------------------+------------------------------------------------------+
+  |down               |这标志着服务器永远不可用                              |
+  |                   |这个参数一直配合ip_hash                               |
+  |                   |使用                                                  |
+  +--------------------------------------------------------------------------+
+  提示：以上的参数和专业的haproxy参数几乎一样
+  4:upstream参数官方说明
+      1)weight=number
+      set a weight of the server,by default 1.
+      设置该服务器的权重，默认值是1，这个数值越大，服务器会被转发更多的请求；
+      注意：当负载均衡算法为ip_hash时，后端服务器在负载均衡调度的状态不能是
+      weight和backup.
+      2)max_failes=number
+      Nginx尝试连接后端主机失败的次数，这个数值是配合proxy_next_upstream,fastcgi_
+      next_upstream,and memcached_next_upstream这三个参数来使用，当nginx接受后端
+      服务器返回这三个参数定义的状态码的时候，会将这个请求转发给正常工作的后端服务器，例如404,502,503. Max_fails 默认值是1;
+      3)fail_timeout=time
+      在max_fails定义的失败次数后，举例下次检查的间隔时间，默认是10S;
+      如果是max_fails是5，他就检测5次，如果5次都是502，那么，他会根据fail_timeout
+      的值，等待10s再去检查
+      4)backup
+      这标志着这个服务器作为备份服务器，当主服务器全部宕机的时候，才会向他转发请求：
+      5)down
+      这个标志着服务器永远不可用，这个参数一直配合ip_hash使用
+      示例：
+      upstream backend {
+          server backend1.example.com    weight=5; #如果就是单个Server，没必要
+          设置权重
+          server 127.0.0.1:8080   max_fails=5 fail_timeout=10s; #当检测次数等于3
+          的时候，间隔30S再检查，这个参数和proxy/fasrcgi/memcached_next_upstream,
+          相关：
+          server unix:/tmp/backend3;
+          server backup1.example.com:8080 backup; #热备机器设置
+      }
+      6)max_fails=5 fail_timeout=10s
+      重新加载nginx配置，如果后端出现proxy_next_upstream中定义的错误(502)，nginx
+      会根据max_fails的值去后端服务器检测，如果max_fails是5，他就检测5次，如果5次
+      都是502，那么，他就会根据fail_timeout的值，等待10S再去检查，过10S后检查一次
+      ，如果还是502，那么继续等待10S，再去检查，还是只检查一次，如果持续502，在不
+      重新加载nginx配置的情况下，每隔10S都只检测一次
+      测试结果见5附录
+      5.特别说明
+      对于nginx代理cache服务时，可能需要使用hash算法，此时，如果宕机时，可通过设置down参数确保客户端用户按照当前的hash算法访问，这点很重要
+      案例：
+      upstream backend {
+          ip_hash;
+          server backend1.example.com;
+          server backend2,example.com;
+          server backend3,example.com;
+          server backend4,example.com;
+
+      }
+      Haproxy负载均衡配置例子
+      开启对后端服务器的监控检测，通过GET /test/index.php来判断后端服务器的健康情
+      况
+      server php_server_1 10.12.25.68:80 cookie 1 check inter 2000 rise 3 fail 3
+      weight 2
+      server php_server_1 10.12.25.72:80 cookie 1 check inter 2000 rise 3 fail 3
+      weight 1
+      server php_server_1 10.12.25.79:80 cookie 1 check inter 2000 rise 3 fail 3
+      backup
+      更多upsream模块参考 http://nginx.org/en/docs/http/ngx_http_upstream_module.html
+1.2.4 upstream模块调度算法
+      1)rr轮询(默认)
+      按客户端请求顺序把客户端的请求逐一分配到不同的后端的服务器，这相当于LVS中
+      rr算法，如果后端服务器宕机(默认情况下只检测80端口，如果后端报502,404,403)
+      ，503，还是会直接返回给用户),宕机服务器会被自动剔除，使用户访问不受影响。
+      请求会分配给正常的服务器
+      2) weight(权重)
+      在轮询算法的基础上加上权重(默认是rr+weight),权重轮询和访问成正比，权重越大
+      ，转发的请求也就越多，可以根据服务器的配置和性能指定权重值大小，可以有效解
+      决新旧服务器性能不均进行请求分配问题
+      示例：
+      后端服务器192.168.1.2配置：E5520*2CPU,8G内存
+      后端服务器192.168.1.3配置：Xeon(TM)2.80GHz*2 4G内存
+      我希望在有30个请求到达前端时，其中20个请求交给192.168.1.3处理，剩余10个请求
+      交给192.168.1.2处理，就可做如下配置；
+      upstream oldboy_lb {
+      server 192.168.1.2 weight=1;
+      server 192.168.1.3 weight=2;
+      }
+      权重测试的例子：实现一个简单的负载均衡
+      3)ip_hash
+      每个请求按访问的IP的HASH结果分配，当新的请求到达时，先将其客户端IP通过哈希
+      算法哈希出一个值，在随后请求客户端，IP的哈希值只要相同，就会被分配至同一台
+      服务器(LVS负载均衡的-P参数，keepalived配置里的presistence_timeout 50),该
+      调度算法可以解决动态网页session共享问题，但有时会导致请求分配不均，即无法
+      保证1:1的负载均衡，在国内所有的公司都是NAT上网，多个PC对应一个外部IP。
+      提示：必须是最前端的服务器，后端也必须直接接应用服务器多数情况不能和权重参数一起使用,http://nginx.org/en/docs/http/ngx_http_upstream_module.html
+      示例：
+      upstream oldboy_lb {
+      ip_hash;
+      server 192.168.1.2:80;
+      server 192.168.1.3:8080;
+      }
+      upstream backend {
+          ip_hash;
+          server backend1.example.com;
+          server backend2.example.com;
+          server backend3.example.com down;
+          server backend4.example.com;
+      }
+      注意 当负载均衡算法为ip_hash时，后端服务器在负载均衡调度中的状态不能是
+      weight和backup
+      4)fair(第三方,NO)
+      按照后端服务器的响应时间来分配请求，响应时间短的优先分配。比上面两个更加智能的负载均衡算法。此种算法可以依据页面大小和加载时间长短智能地进行负载均衡，也就是根据后端服务器的响应时间来分配请求，响应时间短的优先分配。Nginx本身
+      是不支持fair的，如果需要使用这种调度算法，必须下载nginx的upstream_fair模块
+      示例：
+      upstream oldboy_lb {
+      server 192.168.1.2;
+      server 192.168.1.3;
+      failr;
+      }
+      5)url_hash(第三方.NO)
+      按访问url的hash结果来分配请求，让每个url定向的同一后端服务器，后端服务器为
+      缓存服务器时效果显著。在upstream中加入hash语句，server语句中不能写入weight
+      等其他的参数，hash_method是使用的hash算法
+      url_hash。按访问url的hash结果来分配请求，使每个url定向到同一个后端服务器，
+      可以进一步提高后端缓存服务器的效率命中率。Nginx本身是不支持url_hash的，如果
+      需要使用这种调度算法，必须安装nginx的hash软件包
+      upstram oldboy_lb {
+      server squid1:3128;
+      server squid2:3128;
+      hash $request_uri;
+      hash_method crc32;
+      }
+      6)least_conn
+      最少连接数，那个机器连接数少就分发
+      7)一致性HASH
+      http {
+         upstream test {
+              consisten_hash $request_uri;
+              server 127.0.0.1:9001 id=1001 weight=3
+              server 127.0.0.1:9002 id=1002 weight=10
+              server 127.0.0.1:9003 id=1003 weight=20 
+         }
+      }
+
+ 1.2.5 Location指令
+     Nginx中的location指令是NginxHttpCoreModule中重要指令，Location指令比较简单，
+     也比较常用，Sets a configuration base on request URL
+     location指令，是用来对url进行匹配的，URL即语法中的/uri/,可以是字符串或正则表达式。如果是正则表达，则必须指定前缀，location指令根据URI来应用不同的配置，这个指令允许根据不同URI来应用不同的url配置。
+     见http://nginx.org/en/docs/http/ngx_http_core_module.html#location
+ 1.2.6 基本语法
+     语法:
+     location [=|~|~*|^~|@] /uri/ {. . .}
+     location [ = | ~ | ~* | ~~ ] uri {. . .}
+     location @name { ... }
+     解释：
+     [ = ] 精确匹配，如果找到匹配=号的内容，立即停止搜索，并立即处理请求(优先级
+     最高)
+     [ ~ ] 区分大小写
+     [ ^~ ] 只匹配字符串，不匹配正则表达式
+     [ ~* ] 不区分大小写
+     [ @ ]指定一个命名的location，一般只用于内部重定请求，location @name { ... }
+     匹配过程
+     首先对字符串继续匹配查询，最确切的匹配将被使用，然后，正则表达式的匹配查询
+     开始，匹配第一个结果后会停止搜索，如果没有找到正则表达式，将使用字符串的搜索结果，如果字符串和正则都匹配，那么正则优先级较高
+     匹配例子
+     location = / {
+          [ configuration A ]
+     }
+     location / {
+         [ configuration B ]
+     }
+     location /documents/ {
+          [ configuration C ]
+     }
+     location ^~ /images/ {
+         [ configuration D ]
+     }
+     location ~* \.(gif|jpg|jpeg)$ { #不区分大小写,匹配jpg,gif.jpeg
+         [ configuration E ]
+     }
+     3)字符串和正则，字符串优先
+     location ^~ /(.*\.gif)$ {
+     proxy_pass http://dynamic_pools/$1;
+     }
+     location ^~ /static/ {
+      proxy_pass http://static_pools;
+      include extra/proxy.conf;
+     }
+     注意：上面的4段在文件中顺序可以是任意的，出来的效果都一样，虽然嵌套的location指令是允许，但不建议！会引起非预期的结果
+ 1.2.7 location用法
+       +--------------------------------------------------+
+       |location| [=|~|~*|^~|@]| /uri的pattern/|{ ... }   |
+       +--------+--------------+---------------+----------+
+       |匹配指令|匹配的标识    |匹配pattern    |应用的匹配|
+       +--------+--------------+---------------+----------+
+       PATTERN可以用"普通的字符串"或者"正则表达式"来匹配URI，匹配成功则执行里面的
+       指令.
+       这两种匹配的区别
+       常规字符串literal string的匹配是从URI的开头部分就要匹配 匹配标识为：= 或
+       者 空,^~
+       正则匹配是URI里面有部分匹配的就行 匹配标识为:~,~*
+       1) "~" 用于区分大小写(大小写敏感)的匹配
+       2) "~*"用于不区分大小写的匹配
+       3) !~和!~* 分别为区分大小写不匹配及不区分大小写不匹配，对前面1,2的取反
+       实例1：
+       location = / {
+         #只匹配/查询.
+       }
+       这里表示匹配任何查询，因为所有请求都以/开头，但是正则表达式规则和长的快的
+       规则将被优先匹配
+       实例2
+       location ^~ /images/ {
+         #只匹配/查询.
+       }
+       匹配任何以/images/开头的任何查询并且停止搜索，任何正则表达式将不会检查
+       实例3
+       location ~* \.(gif|jpg|jpeg)$ {
+        #匹配任何以gif,jpg或jpeg结尾的请求
+       }
+ 1.2.8 location匹配顺序
+       在决定那个location变量来匹配一个特定的查询时，普通字符串会先检查.普通字符
+       串查找查询的开头做匹配，--将会使用最匹配的那个匹配(我的理解是:使用匹配的
+       最完整的俺哥字符串的匹配).然后正则表达式按照配置文件里面的顺序来匹配，第一
+       个匹配查询的正则表达式会停止剩下的查找，如果没有匹配的正则表达式，就会使用普通字符串的查找结果。
+       "^~"这个前缀可以做URI和location的精确匹配，匹配之后接下来的查找匹配就会停止，例如，如果"/"这个请求常出现，使用"location=/"经会提高一点处理这个请求的速度。
+       如果是精确匹配了(即URI=匹配串),即使没有=和"^~"也直接停止下面的查找匹配总的
+       来说，以如下的顺序来检查指令
+       1)有"="前缀的指令对"查询"做精确的匹配，如果找到了，查找停止。
+       2)指令为常规字符串literal,如果匹配中使用了"^~",查找停止
+       3)指令为正则表达式，按照配置文件里面的顺序查找
+       4)如果#3找到了，那么就用3的，否则，就用#2的。
+       其实优先级就是
+       先：普通字符串(=优先级大于空和^~,空和^~里面精匹配优先)
+       后：正则(~和~*按照出现顺序匹配)
+       现在让我们看一下，在一个典型的，简单的PHP站点中，nginx怎样为一个请求选项
+       location来处理：
+       server {
+           listen     80;
+           server_name nginx.org www.nginx.org;
+           root        /data/www;
+           location / {
+               index     index.html index.php;
+           }
+           location ~*\.(gif|jpg|png)$ {
+               expire 30d;
+           }
+           location ~ \.php$ {
+               fastcgi_pass    localhost:9000;
+               fastcgi_param   SCRIPT_FILENAME;
+                               $document_root$fastcgi_script_name;
+               include         fastcgi_params;
+           }
+       }
+       第一步：nginx使用字符串匹配找出最准确的location,这一步nginx会忽略location
+       在配置文件出现的顺序，上面的配置中，只有唯一一个非正则匹配的location，也就是"/",它可以匹配任意的请求，一般作为最后一个选择
+       第二步,nginx会继续匹配正则表达式的location，匹配到第一个正则表达式后停止搜索。匹配到的location将被使用，正则表达式的匹配，安装配置中的顺序进行，出现
+       在前的优先匹配，如果没有匹配到正则表达式，则使用第一步匹配的结果
+       请注意所有location匹配测试只使用请求的URI部分，而不是用修改参数，这是因为
+       参数在请求串中顺序是任意的，比如：
+       /index.php?user=join&page=1
+       /index.php?page=1&user=join
+       除此以外，任何人在请求串中都可以随意添加字符串:
+       /index.php?page=1&something+else&user=join
+       现在让我们来看一下使用上面的配置进来的请求是如何被处理的：
+       1)如果请求"/logo.gif".此时首先匹配上location "/",然后匹配上正则表达式
+       "\.(gif|jpg|png)$".此时，它将被后匹配上的location处理"root /data/www;"
+       指令，nginx将请求映射到文件""/data/www/logo.gif",并发送logo.gif文件到
+       客户端。
+       如果请求"/index.php",同样首先也匹配上location "/",然后匹配上正则表达式
+       "\.(php)$".此时，他被将后匹配的location处理，会被发送到一个监听在localhost
+       :9000的Fastcgi服务器。"fastcgi_param"指令将fastcgi的参数SCRIPT_FILENAME的
+       值设置为"/data/www/index.php"接着Fastcgi服务器将执行这个文件，变量$documen
+       t_root等于root指令设置的值，变量$fastcgi_script_name的值等于请求的uri,"/in
+       dex.php".
+       3)如果请求"/about.html",则仅能匹配上location "/",因此，它将使用此location
+       进行处理。根据"root /data/www:"指令,nginx将请求映射到文件"/data/www/about
+       .html",并发送about文件到客户端
+       4)请求"/"的处理更为复杂，他仅能匹配上 location "/" 因此，他将使用此locatio
+       n进行处理，然后"index"指令使用它的参数和"root /data/www"指令所组成的文件路
+       径来检测对应的文件是否存在，如果文件"/data/www/index.php"存在，"index"指令
+       将执行一次内被重定向到"/index.php",接着nginx将重新寻找匹配"/index.php"的
+       location
+       通过实例来测试location的匹配顺序
+error_log  logs/error.log error;
+worker_processes  4;
+events {
+    worker_connections  1024;
+    use epoll;
+}
+
+http {
+    server_tokens off;
+    gzip on;
+    gzip_min_length  1k;
+    gzip_buffers     4 32k;
+    gzip_comp_level 3;
+    gzip_types  text/css text/xml application/javascript;
+    gzip_vary on;
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile        on;
+    keepalive_timeout  65;
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+ server {
+        listen       80;
+        server_name  www.etiantian.org;
+          #NO.6
+          location / {
+             return 500;
+          }
+          #NO.5
+          location /oldboy/ {
+             return 404;
+          }
+          #NO.2
+          location ~* \.jpg$ {
+              return 403;
+          }
+          #NO.4与NO.5是不能同时存在的
+          location ^~ /oldboy/ {
+              return 402;
+          }
+          #NO.3
+          location /oldboy/test.jpg {
+              return 401;
+          }
+          #NO.1
+          location /oldboy/text/jpg {
+              return 400;
+         }  
+      }
+    #include extra/www.conf;
+    #include extra/bbs.conf;
+    #include extra/blog.conf;
+    #include extra/upstream01.conf;
+   }
+ 1.2.9 http_proxy_module
+ 1.2.9.1 Proxy_pass 指令
+     Proxy_pass 指令属于ngx_http_proxy_module 模块，此模块可以将请求转发到另一台
+     服务器，
+     看下面的案例
+     location /name/ {
+         proxy_pass http://127.0.0.1/remote/;
+     } 
+     location /some/path/ {
+         proxy_pass http://127.0.0.1;
+     }
+     location /name/ {
+        rewrite   /name/([^/]+) /users?name=$1 break;
+        proxy_pass http://127.0.0.1;
+     }
+ 1.2.9.2 http proxy模块参数
+       Nginx的代理功能是通过http proxy模块来实现的，默认在安装naginx时已经安装了
+       http proxy模块因此可直接使用http proxy模块
+       下面详细解释每个选项代表的含义
+       +-------------------------------------------------------------+
+       |proxy_set_header|设置由后端的服务器获取用户的主机名或者真实IP|
+       |                |地址及代理者的真实IP地址                    |         
+       +-------------------------------------------------------------+
+       |client_body_buffer_size|设置由后端的服务器获取用户的主机名   |
+       |                       |或者真实IP地址及代理者的真实IP地址   |         
+       +-------------------------------------------------------------+
+       |client_connect_timeout |表示与后端服务器连接的超时时间       |
+       |                       |即发起握手等候响应的超时时间         |         
+       +-------------------------------------------------------------+
+       |client_send_timeout:   |表示与后端服务器数据回传时间,即在规定|
+       |                       |的时间之内后端服务器必须传完所有的数 |
+       |                       |据，否则，nginx将断开这个连接        |        
+       +-------------------------------------------------------------+
+       |client_read_timeout    |设置Nginx从代理的后端服务器获取信息的|
+       |                       |的时间,表示连接建立成功后,Nginx等待后|
+       |                       |端服务器的响应时间，其实是Nginx已经进|
+       |                       |入后端的排队之中等候处理的时间       |        
+       +-------------------------------------------------------------+
+       |proxy_buffer_size:     |设置缓存区大小，默认，该缓存区大小等 |
+       |                       |于指令proxy_buffers设置的大小        |        
+       +-------------------------------------------------------------+
+       |proxy_busy_buffer_size |用于设置系统很忙时可以使用的proxy_buf|
+       |                       |fers大小，官方推荐的大小为proxy_buffe|
+       |                       |rs*2                                 |
+       +-------------------------------------------------------------+
+       |proxy_temp_file_write_size|指定proxy缓存临时文件的大小       |       
+       +-------------------------------------------------------------+
+1.3 nginx负载均衡综合实战
+     +---------------------------------+
+     |RS01|10.0.0.17|nginx web01 服务器|
+     +---------------------------------+
+     |RS02|10.0.0.18|nginx web02 服务器|
+     +----+---------+------------------+
+      vim /application/nginx/conf/httpd.conf
+      添加如下内容：
+      include extra/upstream01.conf
+      vim /application/nginx/conf/extra/upstream01.conf
+        添加如下内容
+        upstream blog_real_servers {
+             ip_hash;
+             server 10.0.0.6:80 weight=5;
+             server 10.0.0.8:80 weight=10;
+             server 10.0.0.19.82 weight=15;
+        }
+        server {
+           listen     80;
+           server_name blog.etiantian.org;
+           location / {
+            proxy_pass http://blog_real_servers;
+            proxy_set_header Host $host; #向后端主机请求时，带主机名去请求
+            proxy_set_header X-Forwarded-For $remote_addr;
+           }
+        }
+        2)修改后端real_server的配置文件的日志格式内容为如下(apache)
+          vim /application/apache/conf/httpd.conf
+          LogFormat "\"%{X-Forwarded-For}i\" %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" combined
+          修改所有的虚拟主机的日志格式类型为combined
+          CustomLog "logs/www-access_log" combined
+          CustomLog "logs/bbs-access_log" combined
+          CustomLog "logs/blog-access_log" combined
+          保存退出，重新启动apache服务
+          /application/apache/bin/apachectl restart
+          清空日志文件
+          >blog-access_log
+          tail -F blog-access_log
+        3)修改后端real_server的配置文件的日志格式内容为如下(nginx)
+        vim /application/nginx/conf/nginx.conf
+        log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+        proxy_pass 参数说明：
+        +-----------------------------------+--------------------------+
+        |proxy_pass http://blog_server_pool;|用于指定反向代理的服务器池|
+        +-----------------------------------+--------------------------+
+        |proxy_set_header Host $host;|当后端web服务器上也配置多个虚拟主|
+        |                            |主机时，需要用该Header来区分反向 |
+        |                            |代理那个主机                     |
+        +-----------------------------------+--------------------------+
+        |proxy_set_header X-Forwarded|如果后端web服务器上的程序需要获取|
+        |-For $remote_addr;          |用户IP，从该Header头获取         |
+        +-----------------------------------+--------------------------+
+        http proxy生产环境的配置案例
+        vim /application/nginx/conf/extra/proxy.conf
+        proxy_redirect off;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr; 
+        proxy_connect_timeout 90;
+        proxy_send_timeout 90;
+        proxy_read_timeout 90;
+        proxy_buffer_size 4k;
+        proxy_buffers 4 32k;
+        proxy_busy_buffers_size 64k;
+        proxy_temp_file_write_size 64k;
+
+        upstream blog_real_servers {
+             ip_hash;
+             server 10.0.0.6:80 weight=5;
+             server 10.0.0.8:80 weight=10;
+             server 10.0.0.19.82 weight=15;
+        }
+        server {
+           listen     80;
+           server_name blog.etiantian.org;
+           location / {
+            proxy_pass http://blog_real_servers;
+            include extra/proxy.conf
+           }
+        }
+ 1.3.2 根据uri中的目标地址实现代理转发(动静分离)
+ 1.3.2.1 动静分离之基于目录的代理转发
+         服务器规划表
+         +-----------------------------------------------+
+         |Hostname| IP            |  说明                |
+         +--------+---------------+----------------------+
+         |lb01    |10.0.0.7       |nginx主负载均衡服务器 |
+         +--------+---------------+----------------------+
+         |lb02    |10.0.0.9      |nginx辅助负载均衡服务器|
+         +--------+--------------+-----------------------+
+         |web01   |10.0.0.6      |apache 静态服务器(图片)|
+         +--------+--------------+-----------------------+
+         |dynamic |10.0.0.8      |apache 动态服务器(读写 |
+         |        |              |数据库，浏览)          |
+         +--------+--------------+-----------------------+
+         1)在网站的动态服务器上创建动态目录
+         mkdir /var/html/blog/dynamic 
+         cd dynamic/
+         echo "dynamic web" >index.html
+         2)在网站的静态服务器上创建静态目录
+         mkdir /var/html/blog/static
+         echo "static web 6" >static/index.html
+         3)在负载均衡服务器上配置动静分离功能
+         vim /application/nginx/conf/extra/upstream02.conf
+         upstream static_pools {
+                  server 10.0.0.6:80 weight=5;
+         }
+         upstream dynamic_pools {
+                  server 10.0.0.8:80 weight=5;
+         }
+         server {
+                listen    80;
+                server_name blog.etiantian.org;
+                location / {
+                proxy_pass http://dynamic pools;
+                include extra/proxy.conf;
+                }
+                location /static/ {
+                 proxy_pass http://static.pools;
+                 include extra/proxy.conf;
+                }
+                location /dynamic/ {
+                 proxy_pass http://dynamic pools;
+                 include extra/proxy.conf;
+                }
+                access_log off;
+         }
+         4)修改nginx的主配置文件,添加包含upstream02.conf配置文件
+error_log  logs/error.log error;
+worker_processes  4;
+events {
+    worker_connections  1024;
+    use epoll;
+}
+
+http {
+    server_tokens off;
+    gzip on;
+    gzip_min_length  1k;
+    gzip_buffers     4 32k;
+    gzip_comp_level 3;
+    gzip_types  text/css text/xml application/javascript;
+    gzip_vary on;
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile        on;
+    keepalive_timeout  65;
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+    include extra/upstream02.conf;
+}
+1.3.2.2 nginx7层代理根据扩展名及Useragent转发实战
+        在负载均衡服务器上配置nginx的7层根据uri代理功能
+        vim /application/nginx/conf/extra/upstream02.conf
+         upstream static_pools {
+                  server 10.0.0.6:80 weight=5;
+         }
+         upstream dynamic_pools {
+                  server 10.0.0.8:80 weight=5;
+         }
+         server {
+                listen    80;
+                server_name blog.etiantian.org;
+                location / {
+                proxy_pass http://dynamic_pools;
+                include extra/proxy.conf;
+                }
+                location ~ .*.(gif|jpg|jpeg|png|bmp|swf|css|js)$ {
+	                     proxy_pass http://static_pools;
+	                     include proxy.conf;
+                }
+                location ~ .*.(php|php3|php5)$ {
+	                     proxy_pass http://dynamic_pools;
+	                     include proxy.conf;
+                }
+                access_log off;
+         }
+1.3.3.3 生产场景下的配置nginx的7层根据uri代理功能
+        vim /application/nginx/conf/extra/upstream02.conf
+        upstream bbs_server_pools {
+          server 10.0.10.11:80 weight=1 max-fails=3 fail_timeout=15s;
+          server 10.0.10.12:80 weight=1 max-fails=3 fail_timeout=15s;
+         }
+         upstream blog_server_pools {
+           server 10.0.10.5:80 weight=1 max_fails=2 fail_timeout=20s;
+           server 10.0.10.6:80 weight=1 max_fails=2 fail_timeout=20s;
+           server 10.0.10.7:80 weight=1 max_fails=2 fail_timeout=20s;
+           server 10.0.10.8:80 weight=1 max_fails=2 fail_timeout=20s;
+         }
+         server {
+            listen 80;
+            server_name www.etiantian.org *.etiantian.org;
+            proxy_pass http://static server pools;
+            include extra/proxy.conf;
+            access_log off;
+         }
+       }
+       案例2 
+       vim /application/nginx/conf/extra/upstream02.conf
+        upstream static_server_pools {
+          server 10.0.10.11:80 weight=1 max-fails=3 fail_timeout=15s;
+          server 10.0.10.12:80 weight=1 max-fails=3 fail_timeout=15s;
+         }
+         upstream php_server_pools {
+           server 10.0.10.5:80 weight=1 max_fails=2 fail_timeout=20s;
+           server 10.0.10.6:80 weight=1 max_fails=2 fail_timeout=20s;
+           server 10.0.10.7:80 weight=1 max_fails=2 fail_timeout=20s;
+           server 10.0.10.8:80 weight=1 max_fails=2 fail_timeout=20s;
+         }
+         upstream java_server_pools {
+            server 10.0.10.11:80 weight=1 max_fails=2 fail_timeout=20s
+            server 10.0.10.12:80 weight=1 max_fails=2 fail_timeout=20s
+            server 10.0.10.13:80 weight=1 max_fails=2 fail_timeout=20s
+            server 10.0.10.14:80 weight=1 max_fails=2 fail_timeout=20s
+
+         }
+            server {
+            listen 80;
+            server_name www.etiantian.org *.etiantian.org;
+            proxy_set_header X-Forwarded-For $remote_addr
+            if ($request_uri ~* ".*\.(php|php5)$")
+            {
+               proxy_pass http://php_server_pools;
+            }
+            if ($request_uri ~* ".*\.(jsp|jsp*|do|do*)$")
+            { 
+               proxy_pass http://java_server_pools;
+            }
+            if ($request_uri ~* "^/dynamic/(.*)$")
+            { 
+               proxy_pass http://php_server_pools;
+            }
+            #default config
+            proxy_pass http://static_server_pools;
+            access_log /app/logs/access.log access;
+            include extra/proxy.conf
+         }
+       }
+       vim /application/nginx/conf/extra/proxy.conf
+       #允许客户端请求的最大的单个文件字节数
+       client_max_body_size 10m;
+       #缓冲区代理缓冲用户端请求的最大字节数，可以理解为先保存到本地再传给
+       用户
+       client_body_buffer_size 128k;
+       #跟后端服务器连接的超时时间发起握手等待响应超时时间
+       proxy_connect_timeout 600;
+       #连接成功后，等待后端服务器响应时间，其实已经进入后端的排队中等候处理
+       proxy_read_timeout 600;
+       #后端服务器数据回传时间，就是在规定时间之内后端服务器必须传完所有的数
+       proxy_send_timeout 600;
+       #代理请求缓存区，这个缓存区间会保存用户的头信息以供Nginx进行规则处理
+       ，一般只要保存下头信息即可
+       proxy_buffer_size 8k;
+       #同上，告诉Nginx保存单个用的几个Buffer最大用多大的空间
+       proxy_buffers 4 32k;
+       #如果系统很忙的时候可以申请最大的proxy_buffers官方推荐*2
+       proxy_busy_buffers_size 64k;
+       #proxy缓存临时文件的大小
+       proxy_temp_file_write_size 64k;
+       案例3:根据user_agent转发
+       vim /application/nginx/conf/extra/upstream02.conf
+         upstream static_pools {
+                  server 10.0.0.6:80 weight=5;
+         }
+         upstream dynamic_pools {
+                  server 10.0.0.8:80 weight=5;
+         }
+         server {
+                listen    80;
+                server_name blog.etiantian.org;
+                location / {
+                 if ($http_user_agent ~* "MSIE"){
+                    proxy_pass http://dynamic pools;
+                 }
+                 if ($http_user_agent ~* "Firefox"){
+                    proxy_pass http://static_pools;
+                 }
+                    proxy_pass http://dynamic pools;
+                    include extra/proxy.conf;
+                }
+               
+                access_log off;
+         }
+1.3.3 实现nginx基于user_agent做7层跳转
+1.3.3.1 nginx反向代理调度收集和PC客户端请求道指定服务器实战
+      1)编译upstream02.conf内容如下
+      upstream static_pools {
+                  server 10.0.0.6:80 weight=5;
+      }
+      upstream dynamic_pools {
+                  server 10.0.0.8:80 weight=5;
+      }
+      server {
+              listen    80;
+              server_name blog.etiantian.org;
+              location / {
+                if ($http_user_agent ~* "android")
+                  {
+                    proxy_pass http://dynamic pools;
+                  }
+                if ($http_user_agent ~* "iphone")
+                  {
+                    proxy_pass http://static pools;
+                  }
+                proxy_pass http://dynamic.pools;
+                include extra/proxy.conf;
+               }
+                 access_log off;
+            }
+      2)修改两台后端real-server的虚拟主机配置，
+        vim /application/apache/conf/extra/httpd-vhosts.conf
+        NameVirtualHost *:80 
+      <VirtualHost *:80>
+          ServerAdmin 286937899@qq.com
+          DocumentRoot "/var/html/blog"
+          ServerName blog.etiantian.org
+          ErrorLog "logs/blog_error_log"
+          CustomLog "logs/blog_access_log" common
+      </VirtualHost>
+
+      <VirtualHost *:80>
+          ServerAdmin 286937899@qq.com
+          DocumentRoot "/var/html/bbs"
+          ServerName bbs.etiantian.org
+          ErrorLog "logs/bbs_error_log"
+          CustomLog "logs/bbs_access_log" common
+      </VirtualHost>
+      <VirtualHost *:80>
+           ServerAdmin 286937899@qq.com
+           DocumentRoot "/var/html/www"
+           ServerName www.etiantian.org
+           ServerAlias etiantian.org
+           ErrorLog "logs/www_error_log"
+           CustomLog "logs/www_access_log" common
+      </VirtualHost>
+ 1.3.3.2 proxy_next_upstream健康检查
+         server {
+                listen 80;
+                server_name www.etiantian.org;
+                location / {
+                 proxy_pass http://static_pools;
+                 proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+                 include extra/proxy.conf;
+                }
+                Nginx尝试连接后端主机失败的次数，这个数值是配合proxy_next_up
+                stream,fastcgi_next_upstream,anmemcached_next_upstream这三个
+                参数来使用的，当nginx接受后端服务器返回这三个参数定义的状态码的时候，会将这个请求转发个给正常工作的后端服务器，例如：
+                404,502,503，Max_fails默认值是1；
+
+         }
+ 1.3.4 nginx反向代理节点状态插件开发
+       http://renzhenxing.blog.51cto.com/728846/1322065/
+       http://blog.csdn.net/moqiang02/article/details/42846221
+       check_nginx.sh
+#/bin/bash
+#      
+relist=($(grep 192.168.100. /application/nginx/conf/extra/upstream01.conf|awk -F "[ :]+" '{print $3}'))
+upstream="/application/nginx/conf/extra/upstream01.conf"
+for ((i=0;i<${#relist[*]};i++)); do
+   portnum=$(nmap ${relist[i]} -p 80|grep open|wc -l)
+   if [ $portnum -eq 1 ]; then
+     if [ `grep "#server ${relist[i]}:80" $upstream|wc -l` -ne 0 ]; then
+       sed -i "s@#server ${relist[i]}:80@server ${relist[i]}:80@" $upstream
+     fi
+       echo "${relist[i]} up"
+   else
+     if [ `grep "server ${relist[i]}:80" $upstream | wc -l` -ne 0 ];  then
+       sed -i "s@server ${relist[i]}:80@#server ${relist[i]}:80@" $upstream
+     fi
+     echo "${relist[i]} down"  
+   fi
+done
+
+
+
+
+
+
+
+
+
+                
+       
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+            
+                   
