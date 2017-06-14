@@ -1,0 +1,613 @@
+                         MYSQL+DRBD+Heartbeat高可用服务应用指南
+1.1 MYSQL高可用需求介绍
+1.1.1 MYSQL高可用生产业务需求
+    在企业实际生产场景中，一主多从的MYSQL数据库架构是最常用的DB架构方案，该架构方案部署简单，维护方便，并且通过简单的代理或者程序的方式就可以实现应用服务器对主从库的读写分离，且多个从库还可以通过LVS或haproxy等代理实现对多个库的负载均衡，分担读的压力，同时排除单点故障问题
+    画图讲解
+    但是，在以上的MySQL数据库架构中，我们不难发现，虽然从库多个，但是主库仅仅有有一个，也就是说主库一旦宕机，所有的写业务员都会终止，而从库宕机1个没什么大影响，那么如何解决这个主库单点的问题呢？其实，最简单的方案就是做好监控，然后，然后，主库宕机，有管理员人为手工选择最快的从库改为主库，然后让其他从库和新主库同步，这个方式简单易行，但是需要人工处理，对有些高要求的场合高度不够，那有没有不需要人工处理的方案呢?
+    画图讲解:
+    这就是我们本章要实现的主题--MYSQL+Drbd+Heartbeat高可用服务解决方案，这个解决方案可以
+    有效的解决主库单点的问题，放主库宕机后，可以实现把主库从一个主节点切换到另一个备用的主节点的问题，而所有的从库会自动和新的主库进行同步，且新主库的数据和宕机瞬间的主库几乎完全一致，这个切换过程完全是自动进行的，从而实现了MYSQL主库的热备方案，这套高可用方案也是mysql
+    官方推荐的方案之一
+    请见我们前面的课程网站架构图中的MYSQL主库单点结构图:
+    网站系统架构图(3).jpg
+1.1.2 MYSQL高可用架构拓扑
+1.1.2.1 MySQL高可用架构拓扑
+    正常部署图(绿色为正常)
+    高可用性方案的拓扑图.jpg  
+    正常情况说明
+    1:heartbeat通过串口线或以太网网线直连网卡对对端的服务做健康型检查，并负责执行drbd，mysql
+    ，VIP等资源自动切换
+    2:data-1-2作为data-1-1高可用热备份，正常情况下data-1-1提供一个分区sdb1给MySQL使用
+    3:物理磁盘做raid10或raid0，根据性能和冗余需求来选择
+    4:服务器之间，服务器和交换机之间都是双千兆网卡绑定
+    5:应用服务器(包括不限于web等)通过VIP访问MYSQL主库，通过不同的vip访问负载均衡的从库池
+    6:MySQL的数据在DRBD分区1中
+    7:mysql slave1，mysql slave2通过VIP和主库MySQL进行同步
+    8:以上高可用为MySQL多从的模式，本例属于一主二从。
+1.1.2.2 MYSQL主机宕机切换过程架构拓扑
+    故障动态切换后图(红色为故障)
+    故障动态切换后的逻辑图.jpg
+    故障情况说明
+    1:data-1-2的heartbeat通过串口线或独立网线连接线对data-1-1做健康检查，发现data-1-1挂了后
+    ，自动会在data-1-2上启动drbd,mysql等服务及负责VIP的动态切换，确保主库业务被正常接管，
+    自动对外提供服务，。
+    2:应用服务器(包括不限于web等)，通过VIP访问MySQL主库，通过不同的VIP访问负载均衡的从库池
+    3:物理磁盘做raid10或raid0，根据性能和荣誉需求来选
+    4:服务器之间，服务器和交换机之间都是双千兆网卡绑定
+    5:data-1-1上的MySQL在data-1-1分区1中，故障后在data-1-2上同时实现高可用切换。
+    6:故障后data-1-2的MySQL slave，MySQL slave2 通过VIP和data-1-2上的MySQL主库重新同步
+1.1.2.3 MySQL主库宕机切换新主后架构拓扑
+    MySQL主库宕机切换新主后架构拓扑.jpg
+    提示：经过高可用方案切换后的数据库架构，就变成了一个常规的主从架构了，此时新主库就从热备
+    变成了单点服务了，因此，要快速修复原来的主库或者为主库增加新的热备库，以避免切换后的新主库宕机对业务带来的影响
+1.1.2.4 MySQL源宕机主库恢复后恢复为主库后的架构图拓扑
+    MySQL源宕机主库恢复后恢复为主库后的架构图拓扑.jpg
+    提示：如果热备主库的硬件配置和源主库一致或更好的情况下，也可以在MySQL源宕机主库恢复后，
+    降低角色作为热备节点
+1.1.3 MySQL高可用生产需求描述
+    假设有3台数据库服务器data-1-1/data-1-2/data-1-3,其实际ip为分别为10.0.0.7(data-1-1),
+    10.0.0.8(data-1-2),10.0.0.9(data-1-3)，
+    data-1-1的数据库文件目录为/data，对前端提供的访问vip为10.0.0.17
+    配置目标：一旦主数据库服务器data-1-1宕机，服务器上的MySQL数据库服务和虚拟ip会自动切换
+    服务器data-1-2继续提供服务，从而达到MySQL数据库高可用无业务影响的目的
+    这里会有一个特别的问题，就是以前的多个从库如何能自动和新的主库同步，经过实践，通过drbd的方式同步的数据库，以及做从库时使用的和主库对外提供服务的vip为同步vip，当主机宕机后，VIP
+    漂移大热备主库，默认情况在60秒内，从库就可以连接到新的vip，从而自动核心的主库同步，这里需要强调下，通过Mysql同步做双主的方式，是难以做到主库宕机后，从库和新的主库自动同步的，
+    这也是绝大多数网友的困惑所在
+    提示:
+    本文讲解到是Mysql数据库服务高可用模式，对于Mysql数据库服务高可用，也即是主主的双向高可用模式，具体实施过程，请见我的其他相关文档，对于超大流量的数据库业务，不建议用双主模式，会导致IO争用，降低系统性能
+1.1.4 高可用架构图
+    单主热备模式
+    单主热备模式架构逻辑图.jpg
+    双主热备模式
+    双主热备模式架构逻辑图.jpg<需要截图>
+1.1.5 生产环境服务器硬件配置
+   在我们的生产环境中采用的是DELL R710 服务器2台，硬件配置为
+   --------------------------------------------------------------------------------------
+   |设备名称:   |配置描述                                                               |
+   --------------------------------------------------------------------------------------
+   |CPU         |两颗四核至强处理器 Inter(R) Xeon(R)CPU E5606 @2.13GHz                  |
+   --------------------------------------------------------------------------------------
+   |MEM         |16GB(4*4GB)667GHZ                                                      |
+   --------------------------------------------------------------------------------------
+   |Raid        |SAS/SATA Raid 10 SAS 硬盘 15K                                          |
+   --------------------------------------------------------------------------------------
+   |DISK        |600GB*6 3.5英寸 SAS 硬盘 15K                                           |
+   --------------------------------------------------------------------------------------
+   |网卡        |集成4个Broadcom千兆网卡，支持TOE功能                                   |
+   --------------------------------------------------------------------------------------
+1.4.6 操作系统Centos 5.8/6.4 64bit
+  ---------------------------------------------------------------------------------------
+  |操作系统                                 |其他                                       |
+  ---------------------------------------------------------------------------------------
+  |Centos-5.4-x86_54-bin-DVD.iso            |当前很稳定且免费的Linux版本                |
+  ---------------------------------------------------------------------------------------
+  |Centos-6.4-x86_64-bin-DVD.iso            |当前很稳定且免费的Linux版本                | 
+  ---------------------------------------------------------------------------------------
+1.4.7 网卡及IP资源
+  ---------------------------------------------------------------------------------------
+  |名称         |接口    | IP               | 用途                                      |
+  ---------------------------------------------------------------------------------------
+  |MASTER       |eth0    |10.0.0.7          |管理ip,用于LAN数据转发                     |
+  ---------------------------------------------------------------------------------------
+  |             |eth1    |10.0.10.7         |用于NFS服务器间心跳连接(直连)              |
+  ---------------------------------------------------------------------------------------
+  |VIP          |        |10.0.0.17         |用户提供应用程序A挂载服务                  |
+  ---------------------------------------------------------------------------------------
+  |BACKUP       |eth0    |10.0.0.8          |外网管理ip，用于WAN数据转发                |
+  ---------------------------------------------------------------------------------------
+  |             |eth1    |10.0.10.8         |用于NFS服务器间心跳连接(直连)              |
+  ---------------------------------------------------------------------------------------
+  |vip          |        |                  |                                           |
+  ---------------------------------------------------------------------------------------
+  提示：内外网ip分配可采用最后8位相同的方式，这样便于管理，另外，在实际部署时，存储服务器
+  之间，存储服务器和交换机之间还可以根据访问量需求采用双千兆网卡绑定，提升网卡性能，当我
+  当前的生产环境，未进行网卡绑定
+1.5 实施基础准备
+1.5.1 分别修改服务器机器名
+  分别设置两台机器的hostname为nfs-1-1/nfs-1-2
+  方法为:编辑/etc/sysconfig/network,设置HOSTNAME=nfs-1-1和HOSTNAME=nfs-1-2
+  然后在命令执行hostname nfs-1-1和hostname nfs-1-2，使设置马上生效
+  提示:还可以使用setup命令，然后选Network configuration-->Edit DNS configuration即可设置
+  机器名，这种修改方式退出重新登录机器即可生效
+  nfs-1-1另外添加一个2G的磁盘,<需要两块硬盘>,nfs-1-2添加一个2G的磁盘<需要两块硬盘>
+  提示：data-1-3将作为Mysql从数据库服务器，是用来验证宕机后的从库和新主库自动同步的情况，在
+  mysql主备高可用搭建好之后，我们在来搞这个从服务器不迟，
+1.5.2 分别增加配置hosts文件内容
+  1)配置主机名与域名解析
+  hostname data-1-1
+  sed -i 's@HOSTNAME=.*@HOSTNAME=data-1-1@' /etc/sysconfig/network
+  hostname data-1-2
+  sed -i 's@HOSTNAME=.*@HOSTNAME=data-1-2@' /etc/sysconfig/network
+  cp /etc/hosts /etc/host_$(date +%F)
+  cat >>/etc/hosts<< EOF
+  10.0.10.7 data-1-1
+  10.0.10.8 data-1-2
+  EOF
+1.5.3 关闭iptables和selinux
+  /etc/init.d/iptables stop
+  chkconfig iptables off
+  setenforce 0
+  sed -i 's@SELINUX=.*@SELINUX=disable@' /etc/selinux/config
+1.5.4 配置时间同步
+1.5.5 配置心跳主机路由
+  data-1-1 server上增减如下主机路由:
+  /sbin/route add -host 10.0.10.8 dev eth1
+  echo '/sbin/route add -host 10.0.10.8 dev eth1' >>/etc/rc.local
+  data-1-2 server上增加如下主机路由:
+  /sbin/route add -host 10.0.10.7 dev eth1
+  echo '/sbin/route add -host 10.0.10.7 dev eth1' >>/etc/rc.local
+1.5.6 下载并安装epel包
+  mkdir -p /home/oldboy/tools
+  cd /home/oldboy/tools
+  sed -i 's@keepcache=0@keepcache=1@g'/etc/yum.conf
+  wget -q http://mirrors.ustc.edu.cn/fedora/epel/6/x86_64/epel-release-6-8.noarch.rpm
+  rpm -qa |grep epel
+  [ -f epel-release-6-8.noarch.rpm ] && rpm -ivh epel-release-6-8.noarch.rpm 
+  rpm -qa |grep epel
+1.5.7 安装和配置heartbeat 
+  yum install heartbeat* -y
+  #配置heartbeat
+  cd /usr/share/doc/heartbeat-3.0.4/
+  cp ha.cf haresources authkeys /etc/ha.d/
+  ls -l /etc/ha.d/
+  tar tf etc-ha.d.tar.gz #查看压缩包的内容
+  tar zxvf etc-ha.d.tar.gz -C /
+  #启动heartbeat服务
+  /etc/init.d/heartbeat start
+  chkconfig heartbeat off
+  #查看配置ip(这里heartbeat 3和2是有区别的，2是ifconfig查看)
+  ip addr|grep 10.0.0
+  cat /var/log/ha-debug #查看heartbeat的日志
+  #需要备份yum heartbeat 包以及heartbeat配置文件
+1.6 Centos 6.5安装drbd8.4
+  1)基础准备
+  需要搭建的环境是两台服务器，双网卡，双硬盘
+  2)基础环境的配置
+  在没有安装drbd之前，必须先安装好heartbeat
+  3)对磁盘进行分区
+  #大于2T硬盘要使用parted命令进行分区
+  在data-1-1上对磁盘进行分区操作<2G>
+  parted /dev/sdb mklabel gpt
+  parted /dev/sdb mkpart primary 0 1024
+  parted /dev/sdb p
+  parted /dev/sdb mkpart primary 1025 2146
+  partdd /dev/sdb p
+  在data-1-2上对磁盘进行分区操作<4G>
+  parted /dev/sdb mklabel gpt
+  parted /dev/sdb mkpart primary 0 1024
+  parted /dev/sdb p
+  parted /dev/sdb mkpart primary 1025 2146
+  partdd /dev/sdb p
+  #分区大小不同时有目的的，为后面扩容做准备
+  #对新添加的磁盘快速分区的方法
+  echo -e "n\np\n1\n\n+1G\nn\np\n2\n\n+1G\nw"|fdisk /dev/sdb
+  echo -e "n\np\n1\n\n+2G\nn\np\n2\n\n+2G\nw"|fdisk /dev/sdb
+  partprobe /dev/sdb
+  4)安装配置DRBD(两台服务器配置基本一样)
+  mkdir -p /home/oldboy/tools
+  cd /home/oldboy/tools
+  wget -q http://elrepo.org/elrepo-release-6.5-el6.elrepo.noarch.rpm
+  ls elrepo-release-6-5.el6.elrepo.noarch.rpm
+  rpm -ivh elrepo-release-6-5.el6.elrepo.noarch.rpm
+  sed -i 's@keepcache=0@keepcache=1@g' /etc/yum.conf
+  yum install drbd kmod-drbd84
+  #yum install kernel-devel kernel-heaers flex drbd84-utils kmod-drbd84
+  rpm -qa|grep drbd
+  5)安装drbd并加载到内核
+  mkdir /home/oldboy/tools -p
+  cd /home/oldboy/tools/
+  export LC_ALL=C
+  lsmod |grep drbd
+  modprobe drbd
+  lsmod|grep drbd
+  echo "modprobe drbd >/dev/null 2>&1" >/etc/sysconfig/modules/drbd.modules
+6 配置drbd.conf
+  tar xf arc-10-drbd.conf.tar.gz -C /
+  #生产环境下drbd.conf文件的内容
+#
+global {
+  # minor-count 64;
+  # dialog-refresh 5; # 5 seconds
+  # disable-ip-verification;
+  usage-count no;
+}
+common {
+  protocol C;
+  disk {
+    on-io-error   detach;
+    #size 454G;
+    no-disk-flushes;
+    no-md-flushes;
+  }
+  net {
+    sndbuf-size 512k;
+    # timeout       60;    #  6 seconds  (unit = 0.1 seconds)
+    # connect-int   10;    # 10 seconds  (unit = 1 second)
+    # ping-int      10;    # 10 seconds  (unit = 1 second)
+    # ping-timeout   5;    # 500 ms (unit = 0.1 seconds)
+    max-buffers     8000;
+    unplug-watermark   1024;
+    max-epoch-size  8000;
+    # ko-count 4;
+    # allow-two-primaries;
+    cram-hmac-alg "sha1";
+    shared-secret "hdhwXes23sYEhart8t";
+    after-sb-0pri disconnect;
+    after-sb-1pri disconnect;
+    after-sb-2pri disconnect;
+    rr-conflict disconnect;
+    # data-integrity-alg "md5";
+    # no-tcp-cork;
+  }
+  syncer {
+    rate 330M;
+    al-extents 517;
+  }
+}
+resource data {
+  on master1 {
+    device     /dev/drbd1;
+    disk       /dev/sdb1;
+    address    10.0.10.7:7788;
+    meta-disk  /dev/sdb2 [0];
+  }
+  on master2 {
+    device     /dev/drbd1;
+    disk       /dev/sdb1;
+    address    10.0.10.8:7788;
+    meta-disk  /dev/sdb2 [0];
+  }
+}
+  7 初始化drbd
+  drbdadm create-md data
+  drbdadm up data
+  chkconfig drbd off
+  cat /proc/drbd
+  特别说明:
+  drbd有内部和外部模式，大多数都用内部模式，centos 6.0以上建议使用内部模式
+  如果使用内部模式，是不需要分区的，
+  8 设置主，同步数据到对端
+  #data-1-1上执行，不能再data-1-2上执行
+  drbdadm -- --overwrite-data-of-peer primary data
+  9 挂载写入数据
+  #data-1-1上的操作
+  mkfs.ext4 -b 4096 /dev/drbd0
+  tune2fs -c -1 /dev/sdb1
+  mkdir /data
+  mount /dev/drbd0 /data
+  mount /dev/sdb2 /mnt
+  cd /md1
+  for n in `seq 10`;do cp /bin/cat oldboy$n;done
+  ls -l
+  #data-1-2上不需要格式化磁盘分区
+  mkdir /data
+  drbdadm down data
+  mount /dev/sdb1 /data
+  --------------------------
+  umount /data
+  drbdadm up data
+  -------------------------
+  chkconfig drbd off
+  chkconfig --list drbd
+1.7 配合heartbeat调试drbd服务
+  /etc/init.d/heartbeat stop
+  在data-1-1和data-1-2两台服务器上修改/etc/ha.d/haresources配置文件，添加如下内容
+  data-1-1 IPaddr::10.0.0.17/24/eth0 drbddisk::data Filesystem::/dev/drbd0::/data::ext4
+  配置完成后，保存退出,重新启动heartbeat服务
+  /etc/init.d/heartbeat start
+  提示：以上的配置和命令，需要在data-1-1,data-1-2两台服务器上同时执行，在修改配置文件之前，
+  要停止掉heartbeat服务
+1.8 免编译安装mysql-5.5
+1.8.1 下载并解压mysql-5.5.32-linux2.6-x86_64.tar.gz
+   下载部分就忽略了，可自行到网上下载
+   1)解压软件包
+   mkdir /home/oldboy/tools
+   cd /home/oldboy/tools
+   tar zxf mysql-5.5.32-linux2.6-x86_64.tar.gz -C /application/mysql-5.5.32
+   ln -s /application/mysql-5.5.32/ /application/mysql
+   ls -l /application/
+   2)检查软件包的解压
+   ls -l /application/
+   3)创建用户
+   groupadd mysql
+   useradd -g mysql -M mysql
+   4)初始化数据库，单实例启动
+   mkdir -p /application/mysql/data
+   /application/mysql/scritps/mysql_install_db --basedir=/application/mysql --datadir=/application/mysql/data
+   cp mysql/support-files/mysql.server /etc/init.d/mysqld
+   cp mysql/support-files/my-small.cnf /etc/my.cnf
+   sed -i 's#/usr/local/mysql#/application/mysql#g' /application/mysql/bin/mysqld_safe
+   /application/mysql/bin/mysqld_safe &
+   故障1 当运行/application/mysql/bin/mysqld_safe &时出现如下错误
+   /application/mysql/bin/mysqld: Can't find file: './mysql/plugin.frm' (errno: 13)
+   解决办法：
+   chown -R mysql.mysql /application/mysql/
+   5)增加root的密码
+   /application/mysql/bin/mysqladmin -u root password 'oldboy123'
+   mysql -uroot -p'oldboy123'
+1.9 初始化数据库多实例安装和启动脚本
+   #!/bin/bash
+   #
+   mkdir -p /home/oldboy/tools
+   cd /home/oldboy/tools
+   [ -f mysql-5.5.32-linux2.6-x86_64.tar.gz -a -f data-mysql.cnf.tar.gz ] || {
+       echo "lost mysql soft, pls check it"
+       exit 1
+   } 
+   tar zxf mysql-5.5.32-linux2.6-x86_64.tar.gz
+   mkdir -p /application/
+   /bin/mv mysql-5.5.32-linux2.6-x86_64 /application/mysql-5.5.32
+   ln -s /application/mysql-5.5.32/ /application/mysql
+
+   groupadd mysql
+   useradd -g mysql -M mysql
+
+   tar zxf data-mysql.cnf.tar.gz -C
+   find /data -name mysql -exec chmod 700 {} \;
+   chown -R mysql.mysql /data
+
+   /application/mysql/scirpts/mysql_install_db --basedir=/application/mysql --datadir=/data/3306/data --user=mysql
+   /application/mysql/scirpts/mysql_install_db --basedir=/application/mysql --datadir=/data/3307/data --user=mysql
+   sed -i 's#/usr/loal/mysql#/application/mysql/#g' /application/mysql/bin/mysqld_safe
+   /data/3306/mysql start
+   /data/3307/mysql start
+
+   sleep 5
+   lsof -i :3306
+   lsof -i :3307
+
+   /bin/cp /application/mysql/bin/mysql* /usr/local/sbin/
+   mysqladmin -u root password 'oldboy123' -S /data/3306/mysql.sock
+   mysql -uroot -p'oldboy123' -S /data/3306/mysql.sock
+   mysqladmin -u root password 'oldboy123' -S /data3307/mysql.sock
+2.1 通过手工测试Mysql的高可用切换
+   1)停掉data-1-1和data-1-2的3307Mysql实例
+   /data/3307/mysql stop
+   2)删除备节点data-1-2上的mysql中的数据
+   /data/3306/mysql stop
+   cd /data/3306/
+   mv data /tmp/
+   3)将data-1-1切换成备服务器模式,让data-1-2服务器接管主服务器角色
+   /usr/share/heartbeat/hb_standby
+   4)在data-1-2服务器上查看/data/目录中数据库是否成功同步
+   ll /data/
+   /data/3306/mysql start
+   lsof -i :3306
+2.2 Mysql双主高可用自动切换实战演示
+   1)停掉data-1-2服务器的3306 Mysql实例
+   /data/3306/mysql stop
+   2)data-1-1切换成主服务器模式
+   /usr/share/heartbeat/hb_takeover local
+   3)在data-1-1和data-1-2上修改/etc/ha.d/haresource配置文件内容如下
+   /etc/init.d/heartbeat stop 
+   data-1-1 IPaddr::10.0.0.17/24/eth0 drbddisk::data Filesystem::/dev/drbd0::/data::ext4 mysql
+   cp /data/3306/mysql /etc/ha.d/resource.d/
+   chmod +x /etc/ha.d/resource.d/mysql
+   提示:在修改/etc/ha.d/haresource配置文件内容之前，必须要停掉heartbeat服务后，再修改
+   4)修改完后，重启data-1-1和data-1-2上的heartbeat服务
+   /etc/init.d/heartbeat start
+2.2 测试配置效果
+   #停掉data-1-1上的heartbeat服务
+   /etc/init.d/heartbeat stop
+   #在data-1-2上查看Mysql服务是否正常切换
+   ip addr |grep 10.0.0.17
+   cat /proc/drbd
+   df -h
+   lsof -i:3306
+2.3 mysql高可用切换的重要思想原理
+2.4 Mysql主从同步一键安装脚本实战<mysql主服务器的配置>
+#!/bin/sh
+####################################
+#this scripts is create by wpaccp
+#wpaccp QQ:286937899
+####################################
+MYUSER=root
+MYPASS=123456
+#MAIN_PATH=/server/backup
+DATA_PATH=/server/backup
+IP=192.168.100.107
+[ -d $DATA_PATH ] || mkdir -p $DATA_PATH
+LOG_FILE=${DATA_PATH}/mysqllogs_`date +%F`.log
+DATA_FILE=${DATA_PATH}/mysql_backup_`date +%F`.sql.gz
+
+MYSQL_PATH=/application/mysql/bin
+MYSQL_CMD="$MYSQL_PATH/mysql -u$MYUSER -p$MYPASS"
+MYSQL_DUMP="$MYSQL_PATH/mysqldump -u$MYUSER -p$MYPASS -A -B --flush-logs --single-transaction -e"
+$MYSQL_CMD -e "flush tables with read lock;"
+echo "----------show master status result------------" >>$LOG_FILE
+$MYSQL_CMD -e "show master status;" >>$LOG_FILE
+${MYSQL_DUMP} | gzip >$DATA_FILE
+$MYSQL_CMD -e "unlock tables;"
+MYSQL_CMD="$MYSQL_PATH/mysql -u$MYUSER -p$MYPASS"
+$MYSQL_CMD -e "grant replication slave on *.* to req@'192.168.100.%' identified by '$MYPASS';" 
+$MYSQL_CMD -e "flush privileges;"
+cd $DATA_PATH
+rsync -avzP mysql_backup_$(date +%F).sql.gz root@${IP}:/server/backup/
+rsync -avzP /server/backup/mysqllogs_$(date +%F).log root@${IP}:/server/backup/
+#mail -s "mysql slave log" 286937899@qq.com < $LOG_FILE
+
+<mysql从服务器上的配置脚本>
+#/bin/sh
+###############################################################
+#this scripts is create by wpaccp
+#wpaccp QQ:286937899
+###############################################################
+MYUSER=root
+MYPASS=123456
+IP=192.168.100.207
+MAIN_PATH=/server/backup
+DATA_PATH=/server/backup
+LOG_FILE=${DATA_PATH}/mysqllogs_`date +%F`.log
+DATA_FILE=${DATA_PATH}/mysql_backup_`date +%F`.sql.gz
+
+MYSQL_PATH=/application/mysql/bin
+MYSQL_CMD="${MYSQL_PATH}/mysql -u${MYUSER} -p${MYPASS}"
+#remove
+cd ${DATA_PATH}
+gzip -d mysql_backup_$(date +%F).sql.gz
+$MYSQL_CMD < mysql_backup_`date +%F`.sql
+sed -i 's%server-id = .*%server-id = 61%' /etc/my.cnf
+mysql_bin=`cat /server/backup/mysqllogs_$(date +%F).log|awk '/mysql-bin/{print $1}'`
+master_log_pos=`cat /server/backup/mysqllogs_$(date +%F).log | awk '/mysql-bin/{print $2}'`
+#config slave
+$MYSQL_CMD -e "CHANGE MASTER TO MASTER_HOST='${IP}',MASTER_PORT=3306,MASTER_USER='req',MASTER_PASSWORD='${MYPASS}',MASTER_LOG_FILE='${mysql_bin}',MASTER_LOG_POS=${master_log_pos};"
+$MYSQL_CMD -e "start slave;" 
+$MYSQL_CMD -e "show slave status\G"
+  提示：一定要和VIP同步，如果要实现当mysql数据库宕机后，自动实现主备服务器的切换。你必须要
+  单独写一个监控Mysql主服务的脚本，当Mysql主服务出现故障后，可以停掉主服务器的heartbeat服务器或者将主服务器的heartbeat服务角色切换成备节点，就实现了原来的备节点服务器动态的切换为
+  主服务器的目的。
+2.5 常见MYSQL集群高可用架构
+2.5.1 Mysql自身的数据库同步架构
+  Mysql自身的数据库同步架构逻辑图.jpg
+2.5.1.1 mysql主从同步高可用性方案一
+  架构方案：
+  mysql主从同步高可用性方案图一.jpg
+  架构特点:
+  1)高可用软件keepalived,heartbeat,只负责VIP的切换即可
+  2)此高可用架构部署简单，容易维护
+  3)master故障后业务科自动切换到Slave
+  4)读写都依赖主库，压力大，死锁，锁等待
+  5)Slave可以提供读查询服务，但是依赖程序
+2.5.1.2 MYSQL 主从同步高可用性(二)
+  结构方案:
+  MYSQL 主从同步高可用性二.jpg
+  方案特点
+  1)高可用性软件keepalived,heartbeat，只负责vip切换即可
+  2)master故障后主库业务自动切换到slave
+  3)支持读写分离，写master,读slave1/2，但必须通过程序代码实现
+  4)此方案有没有问题?
+    问题：切换后，slave2可能无法和接管主库的slave1自动同步了
+    解决：利用实时同步机制。
+2.5.1.3 Mysql主从同步高可用方案(三)
+  架构方案:
+   Mysql主从同步高可用方案(三).jpg
+  架构特点:
+  1)高可用软件:keepalived+LVS,MMM.
+  2)双主同步后，可以最两个master做LVS负载均衡了，挂掉一个业务不受影响
+  3)问题:双写会带来严重的问题，增加数据不一致问题的几率
+  4)双写对性能的提升不大，属于复杂化但又没有太多好处的架构方案，不推荐
+2.5.1.4 Mysql主从同步高可用方案(四)
+  架构方案
+  Mysql主从同步高可用方案(四).jpg
+  架构特点
+  1)高可用软件:MMM,keepalived
+  2)挂掉一个主业务不受影响
+  3)双写可以做，但是会增加数据不一致问题
+  4)同一时间保持一个库一个写
+2.5.1.5 Mysql主从同步高可用方案(五)
+  架构方案
+  Mysql主从同步高可用方案(五).jpg
+  架构特点
+  1)高可用软件:keepalived,heartbeat,只负责VIP的切换即可
+  2)主库孤舟业务自动切换到master2，备库依然可以自动同步
+  3)slave1/slave2支持读写分离，但是必须在程序上实现
+  4)此方案有什么问题?
+  1:从库为级联同步，可能同步延迟，
+  2:mater2宕机后，slave同步中断
+2.6 Mysql第三方基于DRBD高可用方案(一)
+   Mysql第三方基于DRBD高可用方案(一).jpg
+2.6.1 Mysql第三方基于DRBD高可用方案(二)
+   架构方案
+   Mysql第三方基于DRBD高可用方案(二).jpg
+   架构特点
+   1)高可用软件:heartbeat，HA不但负责VIP切换，还要负责数据库，DRBD服务的管理
+   2)主库故障后业务会自动切换到BACKUP,slave1/2依然可以和新的主库同步
+   3)slave1/2支持读写分离，但是必须在程序上实现
+   4)此方案也支持实时和异步写入
+   5)此方案有什么问题?
+   1：backup上的服务数据库不能访问，除非提升为主库。
+2.7 Mysql第三方基于SAN共享存储高可用性方案(一)
+    Mysql第三方基于SAN共享存储高可用性方案(一).jpg
+2.7.1 Mysql第三方基于SAN共享存储高可用性方案(一)
+    架构方案
+    Mysql第三方基于SAN共享存储高可用性方案(一).jpg
+    架构特点
+    1)高可用软件:redhat cluster site
+    2)backup无法正常开启
+    3)slave1/2支持读写分离
+    4)业务依赖SAN存储
+2.8 Mysql第三方基于DNS解析的高可用方案
+    架构方案
+    Mysql第三方基于DNS解析的高可用方案.jpg
+    架构特点:
+    1)部署灵活，资源利用率高，
+    2)双master提供写，slave1/2提供读
+    3)业务依赖DNS服务支持
+    4)对长连接的支持不好
+    5)主机宕机影响从库
+2.9 Mysql第三方基于DBPROXY高可用方案
+    架构方案
+    Mysql第三方基于DBPROXY高可用方案.jpg
+    架构特点
+    1)高可用软件MYSQL-proxy/Amoeba
+    2)对前端业务透明读写分离，后端健康检查
+    3)开原方案目前都不稳定
+    4)需要定制开发dbproxy，例如:百度
+2.10 Mysql第三方分布式数据库集群高可用方案
+    Mysql第三方分布式数据库集群高可用方案.jpg
+2.10.1 mysql第三方分布式数据库集群百度二期案例
+    mysql第三方分布式数据库集群百度二期案例.jpg
+2.10.2 mysql第三方基于Galera高可用方案
+   架构方案:Galera是一套MYSQL INNODB上面实现multi-master且synchronous replication的集群系统
+   mysql第三方基于Galera高可用方案.jpg
+   架构特点:
+   1)所有节点为同步复制(非异步)
+   2)真正multi-master，读写可同时应用所有节点.
+   3)自动的节点成员控制，失效节点自动被清除
+   4)没有主从失败的切换，没有VIP
+   5)新节点假如后数据自动复制
+   6)真正的并行复制,行级别，支持多线程slave同步
+   7)用户可以直接连接集群，使用与Mysql完全一致。
+2.12 Mysql官方cluster高可用性方案
+   Mysql官方cluster高可用性方案.jpg
+2.13 mysql高可用架构方案目标
+   性能，可用，安全
+2.14 Mysql高可用架构方案的选择依据
+   Mysql高可用架构方案的选择依据.jpg
+   Mysql高可用架构方案的选择依据2.jpg
+2.15 分布式高可用数据库架构门户案例
+   
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
