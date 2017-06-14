@@ -1,0 +1,1180 @@
+                                        haproxy负载均衡与应用指南
+    1.1.1 Haproxy介绍
+          haproxy是一个开源，高性能的基于TCP和HTTP应用代理的高可用的，负载均衡服务软件
+          它支持双机热备，高可用，负载均衡，虚拟主机，基于TCP和HTTP的应用代理，图形界面查看信息等功能，其配置简单，维护方便，而且拥有很好的对服务器节点的健康检查
+          功能(相当于keepalived健康检查)，当其代理的后端服务器出现故障,haproxy会自动的将该故障服务器摘掉，当故障的服务器恢复后，haproxy还会自动将该服务器自动加入进来提供服务
+          和LVS/NGINX对比
+          haproxy特别适用于那些高负载，访问量很大，但又需要会话保存及七层应用代理的业务应用，haproxy运行在今天的普通的服务器硬件上，几乎不需要进行任何的优化就可
+          以支持数以万计的并发连接。并且它的运行模式使得它可以很简单，轻松，安全的整合
+          到各种已有的网站架构中，同时，haproxy的代理模式，可以使的所有应用服务器不会
+          暴露到公共网络上，即后面的节点服务器不需要公网IP地址
+          从1.3版本起，haproxy软件引入了frontend,backend的功能，frontend(acl规则匹配)
+          可以让运维管理人员根据任意HTTP请求头内容作规则匹配，然后把请求定向到相关的
+          backend(这个事先定义好的多个server pools，等待前端把请求转过来的服务器组)
+          通过frontend和backend,我们可以很容易的实现haproxy的各种7层应用代理功能。
+          Haproxy支持两种主要代理模式：
+          1)基于4层的TCP应用代理(例如：可用于邮件服务，内部协议通信服务器，MYSQL,
+            HTTPS服务等)
+          2)基于7层的HTTP代理。在4层TCP代理模式下，haproxy仅在客户端和服务器之间
+            进行流量转发，但是在7层HTTP代理模式下，Haproxy会分析应用层协议，并且能
+            通过允许，拒绝，交换，增加，修改或者删除请求或者回应里指定内容来控制协议
+    1.1.2 haproxy解决方案拓扑图
+  1.1.2.1 haproxy L4负载均衡应用架构拓扑
+          haproxy软件的四层TCP应用代理非常优秀，且配置非常简单，方便，比LVS和NGINX的配置要简单很多，首先，配置haproxy不需要在RS端坐任何特殊配置(只要对应服务开启就
+          OK)就可以实现应用代理，其次，haproxy的配置语法和增加虚拟主机功能等也比LVS/
+          NGINX简单，并且和商业版的NS(Netscaler),F5,A10等负载均衡硬件的使用方法和在
+          架构中的位置一模一样,甚至老男孩曾经把haproxy配成NS的高可用备节点
+          下面是haproxy的Layer4层应用代理的拓扑结构图:
+          haproxy L4负载均衡应用架构拓扑.jpg
+          说明：由于haproxy软件采用的是类NAT模式(本质不同)的应用代理，数据包来去都会经
+          过haproxy，因此，在流量特别大的情况下(门户级别的流量吧)，其效率和性能不如LVS
+          的DR模式负载均衡。
+          在一般的中小型公司，建议大家采用haproxy做负载均衡，而要使用LVS或nginx。为什麽强调中小型公司呢，换句话说，千万PV级别以下直接使用haproxy做负载均衡，会让
+          我们负责维护的运维管理人员配置简单，快速，维护方便，出问题好排查，这其实就是老男孩老师常说的网站运维原则，简单，易用，高效，有关LVS,Nginx,haproxy的区别
+          ，后面还会讲到(3000万PV以下的网站流量是没有问题的)
+    1.1.3 haproxy L7负载均衡应用架构拓扑
+          haproxy软件的最大优势在于其7层的根据URI请求头应用过滤的功能以及session会话功能，在门户网站的高并发生产架构中，haproxy软件一般用在4层LVS负载均衡软件的下
+          一层，或者像haproxy官方推荐的也可以挂在硬件负载均衡althon,NS,F5,A10下使用，其表现非常好。从2009年起taobao网，京东商城的业务也大面积使用了haproxy做为
+          7层CACHE应用代理
+          下面是haproxy的layer7层应用代理的拓扑架构图
+           haproxy的layer7层应用代理的拓扑架构图.jpg
+    1.1.4 haproxy 服务实施基础准备
+          环境：haproxy需要的模拟环境，NFS,MYSQL高可用的环境即可，其实就是只要heartbeat
+          为了让读者在没有生产环境的情况下也可以学习本章，因此，本章特别为大家定制了
+          linux虚拟机环境进行试验
+          特别强调：
+          搭建适合的模拟环境是一个人学习能力的重要体现。例如：人类第一次上太空也没有
+          真正环境啊，但是想去太空就是要自己动手去搭建逼真的模拟环境。所以，请读者不要
+          抱怨没生产环境发挥你的水平，平时在学习中尽可能的多去模拟去动手做实验，实验做多了就是经验了，那么自然就有接触生产环境的机会了
+          在window7下使用VMWARE配置了多台虚拟机，按规划的IP及网络参数配置后如下所示：
+    1.1.5 实施部署前主机规划表：
+    ----------------------------------------------------------------
+    | 名称    | 接口| IP              |         用途               |                
+    ----------------------------------------------------------------
+    |MASTER   |eth0 | 192.168.100.107 | 外网管理IP，用于WAN数据转发|
+    ----------------------------------------------------------------
+    |         |eth1 | 10.0.0.107      |内网管理IP，用于LAN数据转发 |
+    ----------------------------------------------------------------
+    |         |eth2 |10.0.10.107      |用于服务器间心跳连接(直连)  |
+    ----------------------------------------------------------------
+    |Realserver|eth0|10.0.0.108       |内网管理IP,用于LAN数据转发  |
+    ----------------------------------------------------------------
+    |          |eth1|10.0.10.108      |                            |
+    ----------------------------------------------------------------   
+    1.1.6 安装haproxy软件
+    1.1.6.1 下载haproxy软件包并安装
+          mkdir -p /home/oldboy/tools/haproxy
+          cd /home/oldboy/tools/haproxy
+          LANG=en
+          wget http://haproxy.1wt.eu/download/1.4/src/haproxy-1.4.24.tar.gz
+          tar zxvf haproxy-1.4.24.tar.gz
+          cd haproxy-1.4.24
+          make TARGET=linux26 ARCH=x86_64 USE_EPOLL=1 USE_STATIC_PCRE=1
+          make TARGET=linux26 ARCH=x86_64
+          make TARGET=linux2628 ARCH=x86_64
+          #以上两行为64位的安装方式
+          make TARGET=linux26 ARCH=i386
+          make PREFIX=/application/haproxy-1.4.24 install
+          ln -s /application/haproxy-1.4.24 /application/haproxy
+          ls -l /application
+          提示：
+          1)为了方便大家批量执行，直接列出了命令行,more README查看相关编译信息
+          2)heartbeat的配置本文不提，请参见<<heartbeat服务应用指南>>一文
+          haproxy官方文档：
+          http://haproxy.1wt.eu/download/1.4/doc/configuration.txt
+          http://haproxy.1wt.eu/download/1.3/doc/haproxy-en.txt
+    1.1.7 配置内核参数开发转发功能
+         在/etc/sysctl.conf中加入如下配置
+         net.ipv4.ip_forward = 1 #基于NAT模式的负载均衡都需要打开系统转发功能
+         sysctl -p #使修改生效
+         提示：你也可以通过sed来执行替换
+         快速执行：
+         sed -i 's#net.ipv4.ip_forward = 0#net.ipv4.ip_forward = 1#g' /etc/sysctl.conf
+         grep ip_forward /etc/sysctl.conf
+         sysctl -p
+         提示：其实对于集群的haproxy,内核还需要进行相关调整，见后文。
+    1.1.8 配置haproxy实现L4负载均衡
+    1.1.8.1 初始的haproxy目录(tcp的负载均衡)
+          cd /application/haproxy
+          mkdir -p bin conf logs var/run var/chroot
+          tree
+          cd conf/
+          rz -y
+          less haproxy.conf
+          global
+                chroot /application/haproxy/var/chroot
+                daemon
+                group haproxy
+                user haproxy
+                log 127.0.0.1:514 local0 warning
+                pidfile /application/haproxy/var/run/haproxy.pid
+                maxconn 20000
+                spread-checks 3
+                nbproc 8
+         defaults
+                 log    global
+                 #mode   http
+                 retries 3
+                 option redispatch
+                 contimeout  5000
+                 clitimeout  50000
+                 srvtimeout  50000
+         listen oldboytest
+                 bind *:80
+                 mode tcp
+                 balance roundrobin
+                 timeout server 15s
+                 timeout connect 15s
+                 server web01 10.0.0.8:22 check port 22 inter 5000 fall 5
+                 server web02 10.0.0.18:80 check port 80 inter 5000 fall 5
+          2：基于http的负载均衡
+          global
+                chroot /application/haproxy/var/chroot
+                daemon
+                group haproxy
+                user haproxy
+                log 127.0.0.1:514 local0 warning
+                pidfile /application/haproxy/var/run/haproxy.pid
+                maxconn 20000
+                spread-checks 3
+                nbproc 8
+          defaults
+                 log    global
+                 #mode   http
+                 retries 3
+                 option redispatch
+                 contimeout  5000
+                 clitimeout  50000
+                 srvtimeout  50000
+          listen oldboytest
+                 bind *:80
+                 mode http
+                 stats enable
+                 stats hide-version
+                 stats uri /admin?status
+                 stats auth admin:oldboy123
+                 balance roundrobin
+                 option httpclose
+                 option forwardfor
+                 cookie SERVERID insert indirect
+                 timeout server 15s
+                 timeout connect 15s
+                 server web01 10.0.0.8:80 check port 80 inter 5000 fall 5
+                 server web02 10.0.0.18:80 check port 80 inter 5000 fall 5                 
+                 添加haproxy系统用户
+                 useradd haproxy -s /sbin/nologin
+                 id haproxy
+                 检查haproxy配置文件的合法性
+                 ../sbin/haproxy -f ./haproxy.conf -c
+                 启动haproxy服务
+                 ../sbin/haproxy -f ./haproxy.conf -D
+                 测试haproxy服务性能
+                 ssh -p80 10.0.0.107
+                 for n in `$echo {1..100}`; do
+                    curl http://10.0.0.107
+                    sleep 2
+                 done
+                 通过访问测试，可以发现当使用haproxy的轮询算法时，确实进行
+                 了1:1的服务轮询。负载均衡功能OK
+                 提示：C64的多进程模式，不是1:1的服务轮询，单进程是1:1的服务轮询。
+
+    1.1.9 haproxy配置文件总体
+          haproxy配置文件可以分五部分：
+          global:全局配置参数段，主要用来控制haproxy启动前的进程及系统相关设置。
+          defaults:配置一些默认参数，如果frontend,backend,listen等段未设置则使用
+          defaults端配置。
+          listen:
+          frontend:用来匹配接受客户多请求的域名，url等，并针对不同的匹配，做不同请求处理，
+          backend:定义后端服务器集群，以及对后端服务器的一些权重，队列，连接数等选项的设置。
+    1.1.10 haproxy配置文件示例注释说明
+          global #全局参数设置段
+               chroot /application/haproxy/var/chroot
+               daemon #以守护进程的方式运行
+               group apache
+               user apache #设置运行haproxy的用户和组
+               log 127.0.0.1:514 local0 warning
+               #全局的日志配置，log关键字，指定使用127.0.0.1:514的syslog服务中local0
+               日志设备，日志
+               pidfile /application/haproxy/var/run/haproxy.pid
+               #haproxy进程号的文件路径。
+               maxconn 20000
+               #定义每个haproxy进程的最大连接数，由于每个连接包括一个客户端和一个服务器端，所以单个TCP会话最大数目将是该值的两倍
+               spread-checks 3
+               #tune.maxaccept 100
+               #tune.maxpollevents 180
+               nbproc 8
+               #设置haproxy启动时的进程数，根据官方文档的解释，我将其理解为：该值的设置应该和服务器的核心数一致，即常见的2颗8核心CPU的服务器，即共有16核心，则可以将其设置为：<=16，创建多个进程可以减少每个进程的任务队列，
+               但是过多的进程数也可能会导致进程的崩溃。这里我设置为16
+               defaults #默认部分的定义
+               log 127.0.0.1 local3 err
+               #使用127.0.0.1上的syslog服务的local3设备记录错误信息或者选项全局参数
+               mode  http
+               #mode 语法：mode {http|tcp|health} #http是七层模式，tcp是四层模式，
+               health是健康检测OK
+               #option httplog
+               #启用日志记录HTTP请求，默认haproxy日志记录是不记录HTTP请求的.
+     1.1.11 haproxy服务的启动脚本
+            为了规范haproxy服务的启动，我们将haproxy服务的启动做成常规的脚本(指定的路径为/application/haproxy-1.4.24/bin/haproxy)脚本代码如下:
+            #!/bin/bash
+            #create by oldboy
+            #from http://www.etiantian.org
+            BASE="/application/haproxy"
+            PROG=$BASE/sbin/haproxy
+            PIDFILE=$BASE/var/run/haproxy.pid
+            CONFFILE=$BASE/conf/haproxy.conf
+            case "$1" in
+            start)
+                  $PROG -f $CONFFILE -q -D
+            status)
+                  if [ ! -f $PIDFILE ];then
+                    echo "pid not found"
+                    exit 1
+                  fi
+                  for pid in $(cat $PIDFILE); do
+                          kill -0 $pid
+                          RETVAL="$?"
+                          if [ ! "$RETVAL" = "0" ]; then
+                            echo "process $pid died"
+                            exit 1
+                          fi
+                  done
+                  echo "process is running"
+                  ;;
+          restart)
+                  $PROG -f $CONFFILE -q -sf $(cat $PIDFILE)
+                  ;;
+             stop)
+                  kill $(cat $PIDFILE)
+                  ;;
+             check)
+                  $PROG -f $CONFFILE -c
+                  ;;
+              *)
+                  echo "USAGE: $0 start|restart|status|stop|check"
+                  exit 1
+                  ;;
+              esac
+              #./haproxy start
+     1.1.12 haproxy日志配置(cat /etc/syslog.conf)
+            C5.8
+            编辑 /etc/syslog.conf增加如下配置
+            cat >> /etc/syslog.conf<<EOF
+            #haproxy
+            local0.* /application/haproxy-1.4.24/logs/haproxy.log
+            #end /etc/syslog.conf
+            EOF
+            C6.4
+            编辑 /etc/syslog.conf增加如下配置
+            cat >> /etc/rsyslog.conf<<EOF
+            #haproxy
+            local0.* /application/haproxy-1.4.24/logs/haproxy.log
+            #end /etc/rsyslog.conf
+            EOF
+            C5.8
+            编辑/etc/sysconfig/syslog增加如下配置
+            # Options to syslogd
+            # -m 0 disables 'MARK' message
+            # -r enables logging from remote machines
+            # -x disables DNS lookups on messages recieved with -r
+            # See syslogd(8) for more details
+            SYSLOGD_OPTIONS="-m 0 -r -x"
+            #end /etc/sysconfig/syslog
+            C6.4
+            编辑/etc/sysconfig/syslog修改如下配置
+            SYSLOGD_OPTIONS="-c 2 -m 0 -r -x"
+            tail -1 /etc/sysconfig/rsyslog
+            C5.8
+            /etc/init.d/syslog restart
+            C6.4
+            /etc/init.d/rsyslog restart
+            提示：如果使用C5.8版本，在执行netstat -lntup | grep 514,会显示服务的状态
+            但是C6.4是不会显示任何信息
+            如果能让C6.4在执行netstat -lntup | grep 514命令后，有端口和服务信息显示
+            vim /etc/rsyslog.conf
+            启用以下两个功能选项(配置文件的第13行和14行)
+            $ModLoad imudp
+            $UDPServerRun 514
+            #/etc/init.d/rsyslog restart
+            #netstat -lntup | grep 514
+            #ps -ef | grep -v grep | grep syslog
+            #cd /application/haproxy/bin
+            #./haproxy restart
+            提示:在使用rsyslog服务器时，必须要关闭SELINUX服务，
+     1.1.13 haproxy多种健康检查方法及实例
+     1.1.13.1 基于tcp端口的监控检查
+            使用这种检测方式，haprxoy只会去检查后端server服务的对应端口，根据前面的经验，我们知道这并不能保证节点服务的完全可用，但却可以作为辅助的检查手段，不是非常严格业务环境下也是可以用的，例如
+            ：前面讲解过的keepalived向下的健康检查默认就是基于端口的，对用户体验非常严格，就不要使用基于TCP端口的检查方案。
+            listen www1 
+                    bind 10.0.0.7:80
+                    mode http
+                    balance roundrobin
+                    server www21 10.0.0.21:80 check port 80
+                    server www09 10.0.0.9:80 check
+                    server www08 10.0.0.8:80 check
+            补全上面结尾两行server参数的配置结果：
+             server www09 10.0.0.9:80 cookie www09 check port 80 inter 5
+             000 fall 5
+             server www08 10.0.0.8:80 cookie www08 check port 80 inter 5
+             000 fall 5
+            提示：1)check port 80 表示对80端口进行健康检查，也可以直接写成
+            check
+            2)inter 5000 fall 5 表示没5秒检查一次，一共检查5次，如果
+            有问题就会摘掉出问题的机器
+            3)如果结尾不加"inter 5000 fall 5",则默认情况每2秒检查
+                  一次，一共检查3次，如果有问题就会摘掉出问题的机器
+                  4)相关参数缺省值为S
+                  -inter:2000 意思是不加该参数，正常情况默认每两秒检查一次
+                  -rise :2 意思是不加该参数，在RS宕机后恢复前，检查2次OK
+                  ,认为其复活，并加入集群组中来。
+                  -fall :3 意思是不加该参数，检查3次后，认为RS宕机，
+                           剔除集群组
+                  -port :default server port 不加该参数，默认就是端口检查
+                  -add : specific address for the test(default = address
+                         server)
+                  监控检查的频率，时间等参数
+                  1) maxconn 2048 分配给服务的最大连接数，连接数不是
+                     越大越好，衡量服务器的承受能力，设置其能够承受的最大
+                     值不至于把服务器压垮。
+                  2) weight 12 权重大的接受的访问就越多。
+                  实际演示范例：
+                   listen www1
+                           bind 10.0.0.7:80
+                           mode http
+                           balance roundrobin
+                           server www09 10.0.0.9:80 check port 80
+                           server www08 10.0.0.8:80 check
+                           server www21 10.0.0.21:80 check
+                  官方文档基于TCP的健康检查案例：
+                   listen http_proxy 0.0.0.0:80
+                       mode http
+                       cookie SERVERID
+                       balance roundrobin
+                       server web1 192.168.1.1:80 cookie server01 check
+                       server web2 192.168.1.2:80 cookie server02 check in
+                       ter 500 rise 1 fall 2
+     1.1.13.2 基于HTTP的直接IP URL方式的健康检查
+            1)第一种HEAD配置方法
+            option httpchk HEAD /check.html HTTP/1.0
+            这种检测方式就相当于通过curl http://10.0.0.8/check.html
+            或者wget http://10.0.0.8/check.html 访问地址一样。可以代表后端
+            http服务的可用性
+            option httpchk HEAD /check.html HTTP/1.0
+            实际演示范例2：
+            global
+                chroot /application/haproxy/var/chroot
+                daemon
+                group haproxy
+                user haproxy
+                log 127.0.0.1:514 local0 warning
+                pidfile /application/haproxy/var/run/haproxy.pid
+                maxconn 20000
+                spread-checks 3
+                nbproc 8
+          defaults
+                 log    global
+                 #mode   http
+                 retries 3
+                 option redispatch
+                 contimeout  5000
+                 clitimeout  50000
+                 srvtimeout  50000
+          listen oldboytest
+                 bind *:80
+                 mode http
+                 stats enable
+                 stats hide-version
+                 stats uri /admin?status
+                 stats auth admin:oldboy123
+                 balance roundrobin
+                 option httpclose
+                 option forwardfor
+                 cookie SERVERID insert indirect
+                 timeout server 15s
+                 timeout connect 15s
+                 option httpchk GET /check.html
+                 option httpchk HEAE /check.html HTTP/1.0
+                 server web01 10.0.0.8:80 check port 80 inter 5000 fall 5
+                 server web02 10.0.0.18:80 check port 80 inter 5000 fall 5
+                 5
+                 在后端的realserver主机上创建check.html               
+                 cd /var/www/html
+                 touch check.html
+                 提示：如果你在配置文件中添加了option httpchk HEAE /check.html HTTP/1.0的功能，那么haproxy服务就会屏蔽掉端口检查。
+                 curl 10.0.0.8 -s -I|tail -1
+                 curl 10.0.0.8 -s -I|head -1
+                 实际演示范例2：如何监测主页是403的错误
+                 在配置文件中，屏蔽掉option httpchk GET /check.html和
+                 option httpchk HEAE /check.html HTTP/1.0两个功能选项
+                 然后添加如下功能选项：option httpchk GET / 
+     1.1.13.3 基于具体业务域名的URL健康检查
+              基于域名的URL健康检查：实际上，可以理解为haproxy用下面的方法
+              在访问RS节点确认是否正常来检查
+              curl http://www.etiantian.org/index.jsp 或 wget http://www.etiantian.org/index.jsp方式，
+              这种检测方式，适合于更精细的基于具体业务的监测需求。实际上是带着head host部信息向下健康检查
+              它的使用语法如下：
+              option httpchk HEAD /index.jsp http/1.1\r\nHost:\ www.etiantian.org 或者 option httpchk HEAD /index.jsp http/1.1\r\nHost:\ www.etiantian.org
+              根据具体业务对应的域名来进行更细化的监控，可以用HEAD和GET方式。
+              实际演示范例3：
+            global
+                chroot /application/haproxy/var/chroot
+                daemon
+                group haproxy
+                user haproxy
+                log 127.0.0.1:514 local0 warning
+                pidfile /application/haproxy/var/run/haproxy.pid
+                maxconn 20000
+                spread-checks 3
+                nbproc 8
+          defaults
+                 log    global
+                 #mode   http
+                 retries 3
+                 option redispatch
+                 contimeout  5000
+                 clitimeout  50000
+                 srvtimeout  50000
+          listen oldboytest
+                 bind *:80
+                 mode http
+                 stats enable
+                 stats hide-version
+                 stats uri /admin?status
+                 stats auth admin:oldboy123
+                 balance roundrobin
+                 option httpclose
+                 option forwardfor
+                 cookie SERVERID insert indirect
+                 timeout server 15s
+                 timeout connect 15s
+                 #option httpchk GET /check.html
+                 #option httpchk HEAE /check.html HTTP/1.0
+                 option httpchk GET /check.html HTTP/1.1\r\nHost:www.etiantian.org
+                 server web01 10.0.0.8:80 check inter 5000 fall 5
+                 server web02 10.0.0.18:80 check port 80 inter 5000 fall 5
+                 5
+                 #echo "10.0.0.107 www.etiantian.org" >>/etc/hosts
+                 添加realserver的Apache的虚拟主机功能
+                 vim /etc/httpd/conf/httpd.conf
+                 NameVirtualHost *:80
+                 <VirtualHost *:80>
+                     DocumentRoot /var/www/html/www
+                     ServerName www.etiantian.org
+                     CustomLog logs/access_log common
+                 </VirtualHost>  
+                 <VirtualHost *:80>
+                     DocumentRoot /var/www/html/bbs
+                     ServerName bbs.etiantian.org
+                     CustomLog logs/access_log common
+                 </VirtualHost>
+                 cd /var/www/html
+                 mkdir www bbs
+                 touch www/check.html
+                 touch bbs/check.html
+                 echo "www" >www/index.html
+                 echo "bbs" >bbs/index.html
+                 /etc/init.d/httpd restart 
+     1.1.13.4 其他服务的监控检查(ldap,mysql,smtp)
+             option ldap-check 
+             option mysql-check [ user <username> ]
+             option smtpchk
+             option smtpchk <hello> <domain>
+     1.1.13.5 生产环境健康检查参数如何配置
+     1.1.13.6 生产环境如何正确选择健康检查
+             特别强调：本节内容适用于所有负载均衡软件的监控检查
+             1)常规业务可以使用基于TCP的方式做健康检查，我们在keepalived健康检查时就是这样做的，虽然，keepalived也支持url健康检查。
+             2)由于基于URL的方式做健康检查相对来说比较容易配置，所以
+             更推荐使用基于URL的健康检查
+             可以用http://10.0.0.8/check.html的方式，也可以使用基于域名
+             的http://www.etiantian.org/check.html的方式，后者更高级一些
+             3)实际生产环境中，最重要的最关键的是，我们设置的check.html
+             能否真正的代表RS上的业务状态，即：访问check.html正常，整个
+             业务是否正常，这个是需要我们运维及开发人员去分析的。
+             4)对于用户体验比较高的业务，可以请开发人员设置更加深入的健康
+             检查文件，例如：oldboy.php或oldoboy.jsp，这个健康检查可以
+             深入到数据库，存储及各个接口，如果之一出现异常我就摘除，到底
+             如何做还是需要去思考，实际工作中不是做的越高级越好，根据业务
+             需求达到要求就可以的。
+             5)对于用体验比较高的业务，除了健康检查文件更深入外，健康检查
+             文件更深入外，健康检查的频率，次数都要相应调整，例如：1秒检查一次，一次连不上就摘掉RS，其实，这未必是最好的策略，尤其是服务器节点少的时候，可能会导致haproxy后端瞬间全部被摘除的问题发生。比如京东的间隔配置为3秒，次数为1次，蓝汛3秒，次数10次
+    1.1.13.7 haproxy 的相关生产功能应用
+             haproxy 高可用参数backup功能测试
+             案例1：
+             server www09 10.0.0.9:80 check
+             server www08 10.0.0.8:80 check
+             server www21 10.0.0.21:80 check backup
+             提示：当haproxy配置了backup参数时，只有上述其他的RS节点服务器都宕机后，haproxy才会切换到配置了backup参数的那台RS节点服务器上
+             haproxy 高可用参数option allbackups
+             案例2：
+             option allbackups
+             server web01 10.0.0.8:80 check inter 5000 fall 5
+             server web02 10.0.0.18:80 check port 80 inter 1000 fall 1 backup
+             server web03 10.0.0.171:80 check port 80 inter 1000 fall 1 backup
+             提示：当RS1节点宕机后，RS2和RS3节点同时切换并处于可用状态，实现了多台主机的高可用性.
+             对节点实现准确判断，实现当一台RS宕机后，backup节点能准确切换
+             #health check from upstram monitors
+             acl site_dead1 nbsrv(staticpool) lt 1
+             acl site_dead2 nbsrv(resinpool_woopop) lt 2
+             acl site_dead3 nbsrv(resinpool_coopop) lt 2
+             acl site_dead4 nbsrv(phppool) lt 1
+             acl site_dead5 nbsrv(staticopenpool) lt 1
+             monitor-uri /check
+             monitor fail if site_dead1 site_dead2 site_dead3 site_dead4
+             site_dead5
+     1.1.14 haproxy常见故障处理：
+            故障1：如果在启动haproxy时，出现以下错误
+            haproxy[9822]:proxy oldboytest has no server available!
+            说明后端无节点服务器，
+            解决办法：查看后端的节点服务器是否开启相关的服务。
+     1.1.14.1 haproxy下的RS无法记录客户真实IP问题
+     解决办法
+     1)在haproxy配置文件里加入如下参数：
+     listen www
+     ......
+           option forwardfor
+     提示：该参数最好放在listen www里面
+     2)在RS上对日志格式进行修改
+       传统日志和后抛Netscaler负载均衡的apache日志配置比较
+       vim /etc/httpd/conf/httpd.conf
+       LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%
+       {User-Agent}i\"" combined
+       LogFormat "\"%{X-Forwarded-For}i\" %V %A %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" common
+       LogFormat "%{Referer}i -> %U" referer
+       LogFormat "%{User-agent}i" agent
+       或者：
+       LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%
+       {User-Agent}i\"" combined
+       #LogFormat "%h %l %u %t \"%r\" %>s %b" common
+       #LogFormat "\"%{X-Forwarded-For}i\" %V %A %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"" common
+       LogFormat "\"%{X-Forwarded-For}i" %l %u %t"\"%r" %>s %b" common
+       LogFormat "%{Referer}i -> %U" referer
+       LogFormat "%{User-agent}i" agent
+       #LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %I %O" combinedio
+       3)生产环境负载均衡后面的RS服务器不记录负载均衡的监控检查日志
+         虚拟主机不记录健康检查文件日志(check.txt)
+         setEnvIf Request_URI "^/check\.txt$" dontlog
+         LogLevel warn
+         ErrorLog /var/log/httpd/vhost_error.log
+         CustomLog /var/log/httpd/vhost_access.log combined env=!dontlog
+  1.15 haproxy 双机双主的相关生产应用
+  1.15.1 主备haproxy配置文件区别
+       Difference between the haproxy Master and haproxy BACKUP
+       答：主备haproxy配置文件完全一样，没有任何不同
+  1.15.2 配置备节点haproxy服务
+  1.15.3 解决不存在VIP导致启动haproxy报错问题
+       如出现下面错误
+       /application/haproxy-1.4.24/bin/haproxy restart
+       [ALERT] 124/123518(14463): Starting proxy group:cannot bind socket
+       [ALERT] 124/123518(14463): Starting proxy oldboy-1-1: cannot bind
+       socket
+       出现上面的问题的可能的原因有两个
+       1)haproxy 配置文件里绑定的IP，在本地网卡上并不存在
+       解决办法：在/etc/sysctl.conf中加入如下配置
+       net.ipv4.ip_nonlocal_bind = 1
+       echo 'net.ipv4.ip_nonlocal_bind = 1' >> /etc/sysctl.conf
+       提示：net.ipv4.ip_nonlocal_bind = 1 #此项使启动的haproxy而忽略haproxy配置中的VIP是否存在
+       因为要实施双主即主备同时跑服务，所以每一端的VIP都配置文件里配了，但系统里网卡可能不存在VIP，因此报错
+       sysctl -p
+       #使修改生效
+       2)本地有类似apache或nginx占用了haproxy启动的端口
+       解决办法就是关闭或者更改其他服务的端口
+ 1.15.4 haproxy主从端分别开启转发功能
+       编辑/etc/sysctl.conf增加net.ipv4.ip_forward = 1
+       sed -i 's#net.ipv4.ip_forward = 0#net.ipv4.ip_forward = 1#' /etc/sysctl.conf
+       sysctl -p
+ 1.15.5 生产环境防火墙iptables配置建议
+      (生产环境下高并发高访问量的站点,iptables防火墙可能对LB性能有影响，最好前端硬件防火墙或者干脆不用防火墙)
+      #cat /etc/sysconfig/iptables
+      #Generated by iptables-save v1.3.5 on Thu apr 29 15:52:19 2010
+      *filter
+      :INPUT DROP [0:0]
+      :FORWARD ACCEPT [6:336]
+      :OUTPUT ACCEPT [0:0]
+      -A INPUT -i lo -j ACCEPT
+      -A INPUT -s 124.41.58.0/255.255.255.0 -i eth0 -j ACCEPT #IDC外网允许
+      -A INPUT -s 202.125.61.96/255.255.255.224 -i eth0 -j ACCEPT #办公室外网
+      -A INPUT -s 10.0.0.0/255.255.255.0 -i eth1 -j ACCEPT #IDC内网允许
+      -A INPUT -s 10.0.2.0/255.255.255.0 -j ACCEPT
+      -A INPUT -s 10.0.1.0/255.255.255.0 -j ACCEPT
+      -A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
+      -A INPUT -m state --state RELATED ESTABLISHED -j ACCEPT
+      -A OUTPUT -o lo -j ACCEPT
+      -A OUTPUT -m state --state RELATED ESTABLISHED -j ACCEPT
+      COMMIT
+      # completed on thu apr 29 15:52:19 2010
+      #注意：为提高性能，本配置省略若个，只保留了必须的配置，当让能停掉在前面加防火墙更好，
+1.15.6 heartbeat与haproxy关联问题
+      在生产环境中，haproxy可能与配合heartbeat或keepalived使用，当haproxy无法提供服务时，要不要把业务转移到备机
+      一般情况下这个问题不会发生，如果严格去做的话可以单独写一个守护进程脚本，当haproxy一场的时候，停掉heartbeat
+1.15.7 haproxy日志配置优化
+       grep warn /application/haproxy/conf/haproxy.conf
+       log 127.0.0.1 local0 warning
+       提示：高并发状态下不要用级别info.
+1.15.8 haproxy 多业务多VIP的配置
+1.15.8.1 haproxy多实例的配置
+       配置案例：
+                global
+                chroot /application/haproxy/var/chroot
+                daemon
+                group haproxy
+                user haproxy
+                log 127.0.0.1:514 local0 warning
+                pidfile /application/haproxy/var/run/haproxy.pid
+                maxconn 20000
+                spread-checks 3
+                nbproc 8
+          defaults
+                 log    global
+                 #mode   http
+                 retries 3
+                 option redispatch
+                 contimeout  5000
+                 clitimeout  50000
+                 srvtimeout  50000
+          listen oldboytest
+                 bind 10.0.0.107:80
+                 mode http
+                 stats enable
+                 stats hide-version
+                 stats uri /admin?status
+                 stats auth admin:oldboy123
+                 balance roundrobin
+                 option httpclose
+                 option forwardfor
+                 cookie SERVERID insert indirect
+                 timeout server 15s
+                 timeout connect 15s
+                 #option httpchk GET /check.html
+                 #option httpchk HEAE /check.html HTTP/1.0
+                 #option httpchk GET /check.html HTTP/1.1\r\nHost:www.etiantian.org
+                 server web01 10.0.0.8:80 check inter 5000 fall 5
+                 server web02 10.0.0.18:80 check port 80 inter 5000 fall 5
+                 5
+          listen oldboybbs
+                 bind 10.0.0.108:80
+                 mode http
+                 stats enable
+                 stats hide-version
+                 stats uri /admin?status
+                 stats auth admin:oldboy123
+                 balance roundrobin
+                 option httpclose
+                 option forwardfor
+                 cookie SERVERID insert indirect
+                 timeout server 15s
+                 timeout connect 15s
+                 #option httpchk GET /check.html
+                 #option httpchk HEAE /check.html HTTP/1.0
+                 #option httpchk GET /check.html HTTP/1.1\r\nHost:www.etiantian.org
+                 server web01 10.0.0.8:80 check inter 5000 fall 5
+                 server web02 10.0.0.18:80 check port 80 inter 5000 fall 5
+                 5
+1.15.9 heartbeat与haproxy配合生产场景维护
+1.15.9.1 查看服务是否正常及VIP情况
+     查看日志情况：
+     tail -f /application/haproxy-1.4.24/logs/haproxy.log
+     tail -f /var/log/ha-log
+     tail -f /var/log/messages
+     查看服务的健康状态
+     可以通过浏览器输入服务的VIP健康状态地址，具体地址见haproxy.conf的配置
+     stats uri /admin?stats #健康状态地址
+     stats auth proxy:123456 #访问权限，用户proxy，密码 123456 可自行该的复杂一点。
+     打开浏览器输入:http://vip/admin?stats 回车输入密码验证，可以看到haproxy
+     服务及下面的rs节点的状态信息。
+1.15.10 LB其他性能优化，日常，增删改及故障排除
+1.15.10.1 系统内核调优：cat /etc/sysctl.conf
+        net.ipv4.ip_conntrack_max=6553600
+        net.ipv4.netfilter.ip_conntrack_max=6553600
+        net.ipv4.netfilter.ip_conntrack_tcp_timeout_established=180
+        net.ipv4.netfilter.ip_conntrack_tcp_timeout_time_wait=120
+        net.ipv4.netfilter.ip_conntrack_tcp_timeout_close_wait=60
+        net.ipv4.netfilter.ip_conntrack_tcp_timeout_fin_wait=120
+        net.ipv4.neigh.default.gc_thresh3 = 40960
+        net.ipv4.neigh.default.gc_thresh2 = 20480
+        net.ipv4.neigh.default.gc_thresh1 = 10240
+        net.core.rmem_default = 2097152
+        net.core.rmem_max = 16777216
+        net.core.wmem_max = 16777216
+        net.core.wmem_default = 2097152
+
+        net.ipv4.tcp_fin_timeout = 2
+        net.ipv4.tcp_tw.reuse = 1
+        net.ipv4.tcp_tw.recycle = 1
+        net.ipv4.tcp_keepalive_time = 180
+        net.ipv4.ip_local_port_range = 4000 65000
+        net.ipv4.tcp_max_syn_backlog = 16384
+        net.ipv4.route.gc_timeout = 100
+        net.ipv4.tcp_svn_retries = 1
+        net.ipv4.tcp_max_tw_buckets = 50000
+        net.ipv4.tcp_synack_retries = 1
+1.15.11 haproxy的L7生产应用实践
+1.15.11.1 RS web server测试环境准备
+       在/var下分别建立php nginx resin 3个站点目录，并增加index文件及内容，
+       假设PHP nginx resin分别代表不同的业务服务：
+       PHP 表示动态PHP程序服务；
+       nginx 表示静态图片，js,html等服务
+       resin 表示动态jsp/java服务
+       操作命令：
+       for name in php nginx resin; do mkdir -p /var/$name >/var/$name/index.
+       html;done
+       检查:
+       for name in php nginx resin; do cat /var/$name/index.html;done
+       1)修改REALSERVER的配置文件
+          Listen 8001
+          Listen 8002
+          NameVirtualHost *:8001
+          NameVirtualHost *:80002
+          <VirtualHost *:8001>
+               DocumentRoot /var/www/html/www
+               ServerName www.etiantian.org
+               CustomLog logs/access_log common
+          </VirtualHost>  
+          <VirtualHost *:8002>
+               DocumentRoot /var/www/html/bbs
+               ServerName bbs.etiantian.org
+               CustomLog logs/access_log common
+          </VirtualHost>
+      2)下面的非常重要
+        frontend webserver
+                bind *:80
+        #需求 l.etiantian.org -->nginx.etiantian.org(301)
+        #(short_dom为自定义名称hdr函数包含 Host -i(不区分大小写)匹配 etiantian.org)
+        acl short_dom hdr(Host) -i etiantian.org
+        #prefix前缀跳转 保证访问http://etiantian.org/a.html能够跳转到http://
+        nginx.etiantian.org/a.html
+        #nginx static content
+        backend staticpool
+                balance roundrobin
+                server oldboy 10.0.0.15:80
+        配置案例：
+        global
+                chroot /application/haproxy/var/chroot
+                daemon
+                group haproxy
+                user haproxy
+                log 127.0.0.1:514 local0 warning
+                pidfile /application/haproxy/var/run/haproxy.pid
+                maxconn 20000
+                spread-checks 3
+                nbproc 8
+        defaults
+                 log    global
+                 mode   http
+                 retries 3
+                 option redispatch
+                 contimeout  5000
+                 clitimeout  50000
+                 srvtimeout  50000
+                 stats enable
+                 stats hide-version
+                 stats uri /admin?status
+                 stats auth admin:oldboy123
+        frontend www
+
+                bind 10.0.0.107:80
+                acl etiantian_dom hdr(host) -i www.etiantian.org
+                #定义一个规则etiantian_dom,并从主机池中随机取出一个域名，判断该域名
+                是否匹配www.etiantian.org
+                acl tmp_dom hdr(host) -i bbs.etiantian.org
+                #acl tmp_dom hdr(host) -i test.www.etiantian.org
+
+                #acl dom_123 hdr(Host) -i 123.etiantian.org
+                redirect prefix http://oldboy.51cto.com code301 if etiantian_dom
+                use_backend bbs if tmp_dom
+                default_backend www
+        backend www
+            balance leastconn
+            option httpclose
+            option forwardfor
+            #cookie SERVERID insert indirect
+            server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+            server web02 10.0.0.18:80 check port 80 inter 1000 fall 1
+            #server web03 10.0.0.19:80 check port 80 inter 1000 fall 1 backup
+        backend bbs
+            balance leastconn
+            option httpclose
+            option forwardfor
+            #cookie SERVERID insert indirect
+            server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1
+            server web02 10.0.0.18:80 check port 80 inter 1000 fall 1
+            #server web03 10.0.0.19:80 check port 80 inter 1000 fall 1 backup
+            
+1.5.11.2  对比nginx代理讲解haproxy基于L7的ACL规则
+          提示：
+          frontend:#定义规则以及配置根据规格去找对应的backend对应的资源池
+          backend:RS服务器地址资源池，
+          #<=haproxy frontend
+          frontend相当于多个location的集合
+          location /  
+          {
+            proxy_pass http://www.server.pool; 
+            include extra/proxy.conf;
+          }
+          location /dynamic/ {
+                 proxy_pass http://www.server.pool;
+                 include extra/proxy.conf
+          }
+          if ($request_uri ~*   "^/dynamic/(.*)$"){  
+                 proxy_pass http://php.server.pools; 
+          }
+          #<==haproxy backend就是nginx里的upstream
+          upstream dynamic_pools {
+                   server 10.0.0.18:80 weight=5;
+          }
+       
+1.5.11.3 实现haproxy基于url地址目录做7层跳转 
+1.5.11.3.1 实现haproxy acl规则
+        frontend www
+            bind 10.0.0.107:80
+            acl bbs_dom hdr(host) -i bbs.etiantian.org
+            use_backend bbs if bbs_dom
+            default_backend www
+        backend www
+            balance leastconn
+            server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+        backend bbs
+            balance leastconn
+            server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1 
+1.5.11.3.2 实现301跳转
+        frontend www
+            bind 10.0.0.107:80
+            acl bbs_dom hdr(host) -i bbs.etiantian.org
+            acl etiantian_dom hdr(host) -i www.etiantian.org
+            redirect prefix http://oldboy.51cto.com code301 if etiantian_dom
+            use_backend bbs if bbs_dom
+            default_backend www
+        backend www
+            balance leastconn
+            server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+        backend bbs
+            balance leastconn
+            server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1 
+1.5.11.3.3 实现haproxy基于URL地址目录做7层跳转
+           在比如根据目录进行过滤转发：
+           acl oldboy_static path_beg /nginx/
+           acl oldboy_php path_beg /php/
+           acl oldboy_java path_beg /resin/
+           use_backend nginxpools if oldboy_static
+           use_backend phppools if oldboy_php
+           use_backend javapools if oldboy_java
+           相当于nginx的配置
+           location /dynamic/ {
+                proxy_pass http://php_pools;
+           }
+           案例配置：
+           REALSERVER后台RS节点的配置
+           cd /var/www/html/bbs
+           mkdir oldboy
+           rm -fr oldboy/
+           mkdir php
+           echo php >php/index.html
+           cd ../www/
+           mkdir java
+           echo java >java/index.html
+           haproxy服务器的配置：
+           frontend www
+                   bind 10.0.0.107:80
+                   acl bbs_dom hdr(host) -i bbs.etiantian.org
+                   acl etiantian_dom hdr(host) -i www.etiantian.org
+                   redirect prefix http://oldboy.51cto.com code301 if etiantian_dom
+                   use_backend bbs if bbs_dom
+                   default_backend www
+           frontend test
+                    bind 10.0.0.107:80
+                    acl oldboy_php path_beg /php/
+                    acl oldboy_java path_beg /java/
+                    use_backend bbs if oldboy_php
+                    use_backend www if oldboy_java
+                    default_backend www
+            backend www
+                balance leastconn
+                server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+            backend bbs
+                balance leastconn
+                server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1 
+           以上内容实现了：
+           访问http://nginx.etiantian.org/nginx/ ==>nginxpools后端处理
+           访问http://php.eitantian.org/php/ ===>phppools后端处理
+1.5.11.3.4 实现haproxy基于文件扩展名做7层跳转
+         haproxy服务器的配置：
+           frontend www
+                   bind 10.0.0.107:80
+                   acl bbs_dom hdr(host) -i bbs.etiantian.org
+                   acl etiantian_dom hdr(host) -i www.etiantian.org
+                   redirect prefix http://oldboy.51cto.com code301 if etiantian_dom
+                   use_backend bbs if bbs_dom
+                   default_backend www
+           frontend test
+                    bind 10.0.0.107:80
+                    acl oldboy_php path_beg /php/
+                    acl oldboy_java path_beg /java/
+                    acl oldboy_pic path_end .gif .png .jpg .css .js
+                    acl oldboy_static path_end .gif .png .jpg .css .js
+                    use_backend static if oldboy_static or oldboy_pic
+                    use_backend bbs if oldboy_php
+                    use_backend www if oldboy_java
+                    default_backend www
+            backend www
+                balance leastconn
+                server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+            backend bbs
+                balance leastconn
+                server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1
+            backend static
+                balance leastconn
+                server web01 10.0.0.8:8003 check port 8003 inter 1000 fall 1
+            REALSERVER后台RS节点的配置
+            cd /var/www/
+            vim /etc/httpd/conf/httpd.conf
+            Listen 8001
+            Listen 8002
+            Listen 8003
+            NameVirtualHost *:8001
+            NameVirtualHost *:8002
+            NameVirtualHost *:8003
+            <VirtualHost *:8001>
+                 DocumentRoot /var/www/html/www
+                 ServerName www.etiantian.org
+                 CustomLog logs/access_log common
+            </VirtualHost>  
+            <VirtualHost *:8002>
+                 DocumentRoot /var/www/html/bbs
+                 ServerName bbs.etiantian.org
+                 CustomLog logs/access_log common
+            </VirtualHost> 
+               <VirtualHost *:8003>
+                 DocumentRoot /var/www/html/blog
+                 ServerName blog.etiantian.org
+                 CustomLog logs/access_log common
+            </VirtualHost> 
+            cd ../
+            cp -a bbs blog
+            cd blog/
+            rm -rf php
+            mkdir static
+            cd static/
+            rz -y
+            上传一个图片
+            修改图片名为bgirl.jpg
+            /etc/init.d/httpd restart
+1.5.11.3.5 实现haproxy基于user_agent做7层跳转
+           acl iphone_users hdr_sub(user-agent) -i iphone
+           redirect prefix http://blog.51cto.com if iphone_users
+           acl android_users hdr_sub(user-agent) -i android
+           redirect prefix http://www.51cto.com if android_users
+          案例配置：
+          frontend www
+                   bind 10.0.0.107:80
+                   acl bbs_dom hdr(host) -i bbs.etiantian.org
+                   #acl etiantian_dom hdr(host) -i www.etiantian.org
+                   #redirect prefix http://oldboy.51cto.com code301 if etiantian_dom
+                   acl iphone_users hdr_sub(user-agent) -i iphone
+                   redirect prefix http://blog.51cto.com if iphone_users
+                   acl android_users hdr_sub(user-agent) -i android
+                   redirect prefix http://www.51cto.com if android_users
+                   use_backend bbs if bbs_dom
+                   default_backend www
+           frontend test
+                    bind 10.0.0.107:80
+                    acl oldboy_php path_beg /php/
+                    acl oldboy_java path_beg /java/
+                    acl oldboy_pic path_end .gif .png .jpg .css .js
+                    acl oldboy_static path_end .gif .png .jpg .css .js
+                    use_backend static if oldboy_static or oldboy_pic
+                    use_backend bbs if oldboy_php
+                    use_backend www if oldboy_java
+                    default_backend www
+            backend www
+                balance leastconn
+                server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+            backend bbs
+                balance leastconn
+                server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1
+            backend static
+                balance leastconn
+                server web01 10.0.0.8:8003 check port 8003 inter 1000 fall 1
+1.5.11.3.6 实现haproxy基于IP和端口控制过滤
+              acl valid_ip      src      192.168.1.0/24
+              block if !valid_ip
+         案例配置：
+                   frontend www
+                   bind 10.0.0.107:80
+                   acl bbs_dom hdr(host) -i bbs.etiantian.org
+                   #acl etiantian_dom hdr(host) -i www.etiantian.org
+                   #redirect prefix http://oldboy.51cto.com code301 if etiantian_dom
+                   acl iphone_users hdr_sub(user-agent) -i iphone
+                   redirect prefix http://blog.51cto.com if iphone_users
+                   acl android_users hdr_sub(user-agent) -i android
+                   redirect prefix http://www.51cto.com if android_users
+                   use_backend bbs if bbs_dom
+                   default_backend www
+           frontend test
+                    bind 10.0.0.107:80
+                    acl oldboy_php path_beg /php/
+                    acl oldboy_java path_beg /java/
+                    acl oldboy_pic path_end .gif .png .jpg .css .js
+                    acl oldboy_static path_end .gif .png .jpg .css .js
+                    use_backend static if oldboy_static or oldboy_pic
+                    acl valid_ip      src      192.168.1.0/24
+                    block if !valid_ip
+                    use_backend bbs if oldboy_php
+                    use_backend www if oldboy_java
+                    default_backend www
+            backend www
+                balance leastconn
+                server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+            backend bbs
+                balance leastconn
+                server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1
+            backend static
+                balance leastconn
+                server web01 10.0.0.8:8003 check port 8003 inter 1000 fall 1
+  1.5.12 haproxy 7 层应用的匹配顺序说明
+         更多的匹配规则，查看官方文档
+         /application/haproxy/doc/haproxy/haproxy-en.txt
+         /application/haproxy/doc/haproxy/configuration.txt
+  1.5.13 让haproxy代理的错误页面优雅显示
+  1.5.13.1 http及haproxy常用状态码说明
+        200 - ok，服务器成功返回页面
+        301 - Move Permanently(永久跳转)，请求的网页已永久跳转到新位置
+        403 - Forbidden(禁止访问)，服务器拒绝请求
+        404 - Not Found 服务器找不到请求页面
+        500 - Internal Server Error(内部服务器错误)
+        502 - Bad GateWay(坏网关)，一般是网关服务器请求后端时，后端服务没有
+        按照http协议返回正确结果
+        503 - Service Unavailable(服务当前不可用)，可能因为超载或停机维护
+        504 - Getway Timeout (网关超时)，一般是网关服务器请求后端时，后端服务
+        器没有在特定的时间内完成服务
+1.5.13.2 haproxy错误页面跳转参数说明
+        1) errorfile跳转参数说明
+           errorfile <code> <file>
+           errorfile 400 /etc/haproxy/errorfiles/400badreq.http
+           errorfile 403 /etc/haproxy/errorfiles/403forbid.http
+           errorfile 503 /etc/haproxy/errorfiles/503sorry.http
+        2) 重定向到指定的服务器地址
+           errorloc跳转参数说明
+           errorloc <HTTP_code> <location>
+        案例配置
+        global
+                chroot /application/haproxy/var/chroot
+                daemon
+                group haproxy
+                user haproxy
+                log 127.0.0.1:514 local0 warning
+                pidfile /application/haproxy/var/run/haproxy.pid
+                maxconn 20000
+                spread-checks 3
+                nbproc 8
+        defaults
+                 log    global
+                 mode   http
+                 retries 3
+                 option redispatch
+                 contimeout  5000
+                 clitimeout  50000
+                 srvtimeout  50000
+                 stats enable
+                 stats hide-version
+                 stats uri /admin?status
+                 stats auth admin:oldboy123
+     
+                 errorloc 403 /etc/haproxy/errorfiles/403.html 
+                 errorfile 503 /etc/haproxy/errorfiles/503sorry.http
+         frontend www
+                   bind 10.0.0.107:80
+                   acl bbs_dom hdr(host) -i bbs.etiantian.org
+                   #acl etiantian_dom hdr(host) -i www.etiantian.org
+                   #redirect prefix http://oldboy.51cto.com code301 if etiantian_dom
+                   acl iphone_users hdr_sub(user-agent) -i iphone
+                   redirect prefix http://blog.51cto.com if iphone_users
+                   acl android_users hdr_sub(user-agent) -i android
+                   redirect prefix http://www.51cto.com if android_users
+                   use_backend bbs if bbs_dom
+                   default_backend www
+           frontend test
+                    bind 10.0.0.107:80
+                    acl oldboy_php path_beg /php/
+                    acl oldboy_java path_beg /java/
+                    acl oldboy_pic path_end .gif .png .jpg .css .js
+                    acl oldboy_static path_end .gif .png .jpg .css .js
+                    use_backend static if oldboy_static or oldboy_pic
+                    #acl valid_ip      src      192.168.1.0/24
+                    #block if !valid_ip
+                    use_backend bbs if oldboy_php
+                    use_backend www if oldboy_java
+                    default_backend www
+            backend www
+                balance leastconn
+                server web01 10.0.0.8:8001 check port 8001 inter 1000 fall 1
+            backend bbs
+                balance leastconn
+                server web01 10.0.0.8:8002 check port 8002 inter 1000 fall 1
+            backend static
+                balance leastconn
+                server web01 10.0.0.8:8003 check port 8003 inter 1000 fall 1
+            #mkdir -p /etc/haproxy/errorfiles
+            #cd /etc/haproxy/errorfiles
+            #echo 400 >400badreq.http
+            #echo 403 >403forbid.http
+            #echo 503 >503sorry.http
+            realserver主机上的操作
+            cd /var/www/html/bbs
+            rm -rf index.html
+            cd ../
+            chmod 000 bbs/
+            cd ../
+            chmod 000 *
+            提示，测试时，不要用curl命令去测试效果，直接用浏览器去测试。
+1.5.14 生产环境优化haproxy应用代理
+       案例配置：
+       defaults 
+               log   global   
+               mode  http
+               no    option splice-response
+               retries 3
+               option redispatch
+               option httpclose
+               contimeout 10000
+               clitimeout 50000
+               srvtimeout 50000
+               timeout server 50s
+               timeout connect 5s
+               timeout client 50s
+1.5.14.2 调整后端服务器真实服务的配置参数
+         1)确保haproxy对后端的等待参数大于真实服务器自身向其后端请求的超时
+         时间之和
+         2)调整健康检查的频率
+         3)禁止haproxy记录info日志功能
+         
+  架构思想 
+        当今运维及架构师的两大主题
+        1)数据保护
+        数据库数据:主从(物理故障)，备机binlog保持1天以上，按天做备份
+        百度方案：一主多个从，其中一台做备份服务器，其他做应用服务器
+        图片资源：1)每天晚上全量备份 2)如果要备份的数据超过1个T以上，需要增量备份
+        1)使用rsync增量备份，小文件比对时间很长
+        2)通过drbd，浪费资源，备用节点不可用。
+        3)按时间增量，201404 201405
+        4)程序双写，提交数据写到两个存储服务器
+        5)更新资源写LOG.
+        6)利用inotify,sersync等
+        全量备份方案：
+        1)drbd 2)程序双写，提交数据写到两个存储 3)分布式存储 NOSQL,mysql，mongodb同步机制存储，04)分布式架构方案
+        程序，运维配置文件：按天备份，运维配置文件都要放到SVN，向外发布
+        办公室SVN --> IDC测试---> IDC正式
+        其他相关的
+        备份思想：1) 需求分析：对于每个项目或者业务点：事先定好，备份规划
+        数据库：10分钟，可以丢一天。根据不同的需求出方案
+        需要做全网数据备份解决方案来解决数据保护问题
+        2)7*24小时不间断服务
+        1)集群(LVS,nginx,haproxy,f5,netscaler)，高可用(keepalived,heartbeat nginx haproxy)，性能\扩展:用户体验要好，业务可以扩展，
+        监控：运维级别，业务级别(按产品线监控，流量，负载，访问请求，错误日志50X,40
+        接口的存活，以及流量)
+        参考文献：
+        http://os.51cto.com/art/201212/371228.html
+        http://os.51cto.com/art/201212/371228_1.html
+        http://os.51cto.com/art/201212/371228_2.html
+        http://os.51cto.com/art/201212/371626.html
+        http://os.51cto.com/art/201212/306707.html
+
+
+
