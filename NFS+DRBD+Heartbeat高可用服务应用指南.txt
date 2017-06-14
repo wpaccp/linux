@@ -1,0 +1,818 @@
+                             NFS+DRBD+Heartbeat高可用服务应用指南
+1.1 NFS高可用需求介绍
+1.1.1 NFS高可用生产业务需求
+  在企业实际的生产场景中，NFS网络文件存储系统是中小企业中最常用的存储架构解决方案，该架构方案部署简单，维护方便，并且只需要通过配置inotify(inotify+rsync)简单的高效的数据同步方式就实现
+  NFS存储系统的数据进行异机主从同步以及实现数据分离(类似于MYSQL的主从同步方式)，且多个从NFS
+  存储系统还可以通过LVS或haproxy等代理实现业务负载均衡，既分担大并发读数据的压力，同时又排除了从NFS存储的单点问题
+  画图讲解
+  但是，在以上NFS存储系统架构中，我们不难发现，虽然从NFS存储系统是多个，但是主NFS存储系统仅仅只用一个，也就是说主NFS存储系统一旦宕机，所有的写业务都会终止，而从NFS存储系统宕机1个就没什么大影响，那么如何解决这个主NFS存储系统单点的问题呢？其实，可以做好业务服务监控，然后，当主NFS存储系统宕机后，报警管理员来人为手工根据同步的日志记录选择最快的从nfs存储系统改为主，然后让其他从NFS存储系统和新主nfs存储同步，这个方式简单易行，但是需要人工处理，这是第一课程阶段我们采纳的方式，那么没有不需要人工处理的方案呢?
+  这就是我们本章要实现的主题nfs+drbd+heartbeat高可用服务解决方案，这个解决方案可以有效的解决主NFS粗采纳系统单点的问题，当主NFS存储系统宕机后，可以实现把主NFS存储系统从一个主节点切换到另一个备用的主节点，而新的主NFS存储系统还会自动和所有其他的从NFS存储系统进行同步，而且新的主NFS存储系统的数据和宕机瞬间的旧的主NFS存储系统几乎完全一致，先喝个切换过程完全是自动进行的，从而实现了NFS存储系统的热备方案，这套存储的分布式及高可用性方案也是我推荐的方案之一
+  和其他分布式文件系统MFS，FASTDFS,GFS,等文件系统相比，本套方案的部署要简单和多，且容易维护控制，符合简单，易用，高效的原则，但是本套架构也有其自身的缺点
+  例如:
+  1)每个点都是全部的数据(和mysql同步一样)
+  2)大数据量文件同步可能会有数据延迟发生，当然，我们也可以根据不同的数据目录进行目录拆分同步
+  ，这类似MYSQL的库表拆分方案，对于延迟我呢提我们可以开启多个同步实例并通过程序实现读写逻辑来控制，当然监控同步状态也是必不可少的
+  请见我们前面的课程网站架构图的NFS存储系统单点结构图
+ 1.2.1 NFS高可用架构拓扑
+   NFS高可用正常部署图(绿色图为正常)
+   NFS高可用正常部署图.jpg
+   正常情况说明:
+   1)Heartbeat 通过串口线或以太网网线直连网卡对对端的服务做健康检查，并负责执行DRBD,NFS,
+   VIP等资源自动切换。
+   2)Nfs-1-2作为Nfs-1-1高可用热备份，正常情况下Nfs-1-1提供一个分区sdb1给NFS使用。
+   3)物理磁盘做RAID10或RAID0，根据性能和荣誉需求来选择
+   4)应用服务器(包括不限于web等)通过VIP访问NFS主nfs存储系统，通过不同的VIP访问负载均衡的从
+   nfs存储系统池
+   5)nfs的数据在drbd分区1中
+   6)NFS slave1，NFS slave2通过VIP和主NFS存储系统NFS进行同步
+   7)以上高可用为NFS多从的模式，本例属于一主二从
+   8)服务器之间，服务器和交换机之间都是双千兆网卡绑定
+1.2.2 NFS主存储系统当家切换过程架构拓扑(红色为故障)
+   NFS高可用故障图.jpg
+   故障情况说明：
+   1)Nfs-1-2的heartbeat通过串口线或独立网线连接线对Nfs-1-1做健康检查，发现Nfs-1-1挂了后，自
+   动在Nfs-1-2上启动drbd,nfs,等服务及负责VIP的动态切换，确保主Nfs存储系统业务正常接管，自动
+   的对外提供服务
+   2)应用服务器(包括不限于web等)通过VIP访问NFS主Nfs存储系统，通过不同的VIP访问负载均衡从nfs
+   存储系统池
+   3)物理磁盘做raid10或raid0，根据性能和冗余需求来选
+   4)服务器之间，服务器和交换机之间都是双千兆网卡绑定
+   5)Nfs-1-1上的nfs在Nfs-1-1分区1中，故障后在Nfs-1-2上同时红丝线高可用切换
+   6)故障后Nfs-1-2的Nfs slave1,Nfs-slave2通过VIP和Nfs-1-2上的NFS主nfs存储系统重新同步
+1.2.3 故障动态切换后新主架构拓扑图(去掉故障点图)
+   故障动态切换后新主架构拓扑图.jpg
+   提示:经过高可用方案切换后的数据NFS存储系统架构，就变成一个常规的主从架构了，此时，新的主存储系统就从热备NFS存储系统变成了单点业务了，因此 ，要尽快修复原来的主NFS存储系统或者为主
+   NFS存储系统增加新的热备NFS存储系统，以避免切换后的新主NFS存储宕机对业务带来影响
+1.2.4 源宕机主nfs存储系统恢复后的架构拓扑(绿色为正常)
+      源宕机主nfs存储系统恢复后的架构拓扑.jpg
+   提示：如果热备主NFS存储系统的硬件配置和源主NFS存储系统一致或更好的情况下，也可以在NFS源宕机主nfs存储系统恢复后，降低角色作为热备节点。
+1.3.1 NFS高可用生产需求描述
+   本案例假设有3台nfs存储系统服务器nfs-1-1/nfs-1-2/nfs-1-3，其实际ip分别为10.0.0.7(nfs-1-1),
+   10.0.0.8(nfs-1-2),10.0.0.9(nfs-1-3)
+   nfs-1-1的nfs存储系统文件目录为/md1,对前端提供的访问VIP为10.0.0.17
+   配置目标:一旦主NFS存储系统服务器nfs-1-1宕机，该服务器上的nfs存储系统服务和虚拟ip会自动切
+   换到热备服务器nfs-1-2s上继续提供服务，从而达到nfs存储系统高可用当即后无业务影响的目的
+   这里会有一个特别的问题，就是以前的多个从nfs存储系统如何能自动和新的主NFS存储系统同步，经过实践，通过DRBD方式同步打到数据NFS存储系统，以及做从NFS存储系统时使用和主NFS存储系统对外提供的vip为同步vip，当主NFS存储系统当即后，vip漂移到热备主NFS存储系统，默认情况在几秒钟内
+   ，新的主NFS存储系统就可以启动同步程序自动把数据同步到所有的从NFS存储系统中。
+   提示：本文讲解的是NFS数据库服务主备高可用模式，对于NFS数据库服务高可用，也可以是主主的双向高可用模式，具体的实施过程，请见我的其他相关文档，对于超大流量的数据库业务，不建议用双主模式，会导致IO争用，降低系统性能
+1.4.1 高可用架构图
+1.4.1.1 单主多从热备模式架构图
+   单主多从热备模式架构图.jpg(高可用正常部署图)
+1.4.1.2 双主多从热备模式存储架构
+   双主多从热备模式存储架构.jpg
+1.4.1.3 生产服务器硬件配置
+   在我们的生产环境中采用的是DELL R710 服务器2台，硬件配置为
+   --------------------------------------------------------------------------------------
+   |设备名称:   |配置描述                                                               |
+   --------------------------------------------------------------------------------------
+   |CPU         |两颗四核至强处理器 Inter(R) Xeon(R)CPU E5606 @2.13GHz                  |
+   --------------------------------------------------------------------------------------
+   |MEM         |16GB(4*4GB)667GHZ                                                      |
+   --------------------------------------------------------------------------------------
+   |Raid        |SAS/SATA Raid 10 SAS 硬盘 15K                                          |
+   --------------------------------------------------------------------------------------
+   |DISK        |600GB*6 3.5英寸 SAS 硬盘 15K                                           |
+   --------------------------------------------------------------------------------------
+   |网卡        |集成4个Broadcom千兆网卡，支持TOE功能                                   |
+   --------------------------------------------------------------------------------------
+1.4.1.4 操作系统Centos 5.8/6.4 64bit
+  ---------------------------------------------------------------------------------------
+  |操作系统                                 |其他                                       |
+  ---------------------------------------------------------------------------------------
+  |Centos-5.4-x86_54-bin-DVD.iso            |当前很稳定且免费的Linux版本                |
+  ---------------------------------------------------------------------------------------
+  |Centos-6.4-x86_64-bin-DVD.iso            |                                           | 
+  ---------------------------------------------------------------------------------------
+1.4.1.5 网卡及IP资源
+  ---------------------------------------------------------------------------------------
+  |名称         |接口    | IP               | 用途                                      |
+  ---------------------------------------------------------------------------------------
+  |MASTER       |eth0    |10.0.0.7          |管理ip,用于LAN数据转发                     |
+  ---------------------------------------------------------------------------------------
+  |             |eth1    |10.0.10.7         |用于NFS服务器间心跳连接(直连)              |
+  ---------------------------------------------------------------------------------------
+  |             |eth2    |10.0.11.7         |用于NFS服务器DRBD同步(直连)<不使用>        |
+  ---------------------------------------------------------------------------------------
+  |VIP          |        |10.0.0.17         |用户提供应用程序A挂载服务                  |
+  ---------------------------------------------------------------------------------------
+  |BACKUP       |eth0    |10.0.0.8          |外网管理ip，用于WAN数据转发                |
+  ---------------------------------------------------------------------------------------
+  |             |eth1    |10.0.10.8         |用于NFS服务器间心跳连接(直连)              |
+  ---------------------------------------------------------------------------------------
+  |             |eth2    |10.0.11.8         |用于NFS服务器DRBD同步(直连)<不使用>        |
+  ---------------------------------------------------------------------------------------
+  |vip          |        |                  |                                           |
+  ---------------------------------------------------------------------------------------
+  |NFS slave    |eth0    |10.0.0.18         |管理ip，用于LAN内数据转发                  |
+  ---------------------------------------------------------------------------------------
+  提示：内外网ip分配可采用最后8位相同的方式，这样便于管理，另外，在实际部署时，存储服务器
+  之间，存储服务器和交换机之间还可以根据访问量需求采用双千兆网卡绑定，提升网卡性能，当我
+  当前的生产环境，未进行网卡绑定
+1.5 实施基础准备
+1.5.1 分别修改服务器机器名
+  分别设置两台机器的hostname为nfs-1-1/nfs-1-2
+  方法为:编辑/etc/sysconfig/network,设置HOSTNAME=nfs-1-1和HOSTNAME=nfs-1-2
+  然后在命令执行hostname nfs-1-1和hostname nfs-1-2，使设置马上生效
+  提示:还可以使用setup命令，然后选Network configuration-->Edit DNS configuration即可设置
+  机器名，这种修改方式退出重新登录机器即可生效
+  nfs-1-1添加一个2G的磁盘，nfs-1-2添加一个4G的磁盘
+  nfs-1-3作为nfs从数据nfs存储系统服务器，是用来验证宕机后的从nfs存储系统和新主NFS存储系统
+  自动同步情况，在NFS主备可用搭建好之后，我们在来搞这个从服务器不迟，因此这里先忽略
+1.5.2 分别增加配置hosts文件内容
+  1)配置主机名与域名解析
+  hostname data-1-1
+  sed -i 's@HOSTNAME=.*@HOSTNAME=data-1-1@' /etc/sysconfig/network
+  hostname data-1-2
+  sed -i 's@HOSTNAME=.*@HOSTNAME=data-1-2@' /etc/sysconfig/network
+  cp /etc/hosts /etc/host_$(date +%F)
+  cat >>/etc/hosts<< EOF
+  10.0.10.7 data-1-1
+  10.0.10.8 data-1-2
+  EOF
+  2)关闭iptables和selinux
+  /etc/init.d/iptables stop
+  chkconfig iptables off
+  setenforce 0
+  sed -i 's@SELINUX=.*@SELINUX=disable@' /etc/selinux/config
+  3)配置时间同步
+  4)配置心跳主机路由
+  data-1-1 server上增减如下主机路由:
+  /sbin/route add -host 10.0.10.8 dev eth1
+  echo '/sbin/route add -host 10.0.10.8 dev eth1' >>/etc/rc.local
+  data-1-2 server上增加如下主机路由:
+  /sbin/route add -host 10.0.10.7 dev eth1
+  echo '/sbin/route add -host 10.0.10.7 dev eth1' >>/etc/rc.local
+  4)下载并安装epel包
+  mkdir -p /home/oldboy/tools
+  cd /home/oldboy/tools
+  sed -i 's@keepcache=0@keepcache=1@g'/etc/yum.conf
+  wget -q http://mirrors.ustc.edu.cn/fedora/epel/6/x86_64/epel-release-6-8.noarch.rpm
+  rpm -qa |grep epel
+  [ -f epel-release-6-8.noarch.rpm ] && rpm -ivh epel-release-6-8.noarch.rpm 
+  rpm -qa |grep epel
+1.5.3 安装和配置heartbeat 
+  yum install heartbeat* -y
+  #配置heartbeat
+  cd /usr/share/doc/heartbeat-3.0.4/
+  cp ha.cf haresources authkeys /etc/ha.d/
+  ls -l /etc/ha.d/
+  tar tf etc-ha.d.tar.gz #查看压缩包的内容
+  tar zxvf etc-ha.d.tar.gz -C /
+  #启动heartbeat服务
+  /etc/init.d/heartbeat start
+  #查看配置ip(这里heartbeat 3和2是有区别的，2是ifconfig查看)
+  ip addr|grep 10.0.0
+  cat /var/log/ha-debug #查看heartbeat的日志
+  #需要备份yum heartbeat 包以及heartbeat配置文件
+1.6 Centos 6.5安装drbd8.4
+  1)基础准备
+  需要搭建的环境是两台服务器，双网卡，双硬盘
+  2)基础环境的配置
+  在没有安装drbd之前，必须先安装好heartbeat
+  3)对磁盘进行分区
+  #大于2T硬盘要使用parted命令进行分区
+  在data-1-1上对磁盘进行分区操作<2G>
+  parted /dev/sdb mklabel gpt
+  parted /dev/sdb mkpart primary 0 1024
+  parted /dev/sdb p
+  parted /dev/sdb mkpart primary 1025 2146
+  partdd /dev/sdb p
+  在data-1-2上对磁盘进行分区操作<4G>
+  parted /dev/sdb mklabel gpt
+  parted /dev/sdb mkpart primary 0 2048
+  parted /dev/sdb p
+  parted /dev/sdb mkpart primary 2049 4292
+  partdd /dev/sdb p
+  #分区大小不同时有目的的，为后面扩容做准备
+  #对新添加的磁盘快速分区的方法
+  echo -e "n\np\n1\n\n+1G\nn\np\n2\n\n+1G\nw"|fdisk /dev/sdb
+  echo -e "n\np\n1\n\n+2G\nn\np\n2\n\n+2G\nw"|fdisk /dev/sdb
+  4)安装配置DRBD(两台服务器配置基本一样)
+  mkdir -p /home/oldboy/tools
+  cd /home/oldboy/tools
+  wget -q http://www.elrepo.org/elrepo-release-6-6.el6.elrepo.noarch.rpm 
+  ls elrepo-release-6-5.el6.elrepo.noarch.rpm
+  rpm -ivh elrepo-release-6-5.el6.elrepo.noarch.rpm
+  sed -i 's@keepcache=0@keepcache=1@g' /etc/yum.conf
+  yum install drbd kmod-drbd84
+  #yum install kernel-devel kernel-heaers flex drbd84-utils kmod-drbd84
+  rpm -qa|grep drbd
+  5)安装drbd并加载到内核
+  mkdir /home/oldboy/tools -p
+  cd /home/oldboy/tools/
+  export LC_ALL=C
+  lsmod |grep drbd
+  modprobe drbd
+  lsmod|grep drbd
+  echo "modprobe drbd >/dev/null 2>&1" >/etc/sysconfig/modules/drbd.modules
+  
+  6 配置drbd.conf
+  tar xf arc-10-drbd.conf.tar.gz -C /
+  #生产环境下drbd.conf文件的内容
+global {
+    # minor-count 64;
+    # dialog-refresh 5; # 5 seconds
+    # disable-ip-verification;
+    usage-count no;
+}
+
+common {
+  protocol C;
+
+  disk {
+    on-io-error   detach;
+    no-disk-flushes;
+    no-md-flushes;
+  }
+
+  net {
+    sndbuf-size 512k;
+    # timeout       60;    #  6 seconds  (unit = 0.1 seconds)
+    # connect-int   10;    # 10 seconds  (unit = 1 second)
+    # ping-int      10;    # 10 seconds  (unit = 1 second)
+    # ping-timeout   5;    # 500 ms (unit = 0.1 seconds)
+    max-buffers     8000;
+    unplug-watermark   1024;
+    max-epoch-size  8000;
+    # ko-count 4;
+    # allow-two-primaries;
+    cram-hmac-alg "sha1";
+    shared-secret "hdhwXes23sYEhart8t";
+    after-sb-0pri disconnect;
+    after-sb-1pri disconnect;
+    after-sb-2pri disconnect;
+    rr-conflict disconnect;
+    # data-integrity-alg "md5";
+    # no-tcp-cork;
+  }
+
+  syncer {
+    rate 630M;
+    al-extents 517;
+  }
+}
+resource data {
+  on master1 {
+    device     /dev/drbd1;
+    disk       /dev/sdb1;
+    address    10.0.10.7:7788;
+    meta-disk  /dev/sdb2 [0];
+  }
+  on master2 {
+    device     /dev/drbd1;
+    disk       /dev/sdb1;
+    address    10.0.10.8:7788;
+    meta-disk  /dev/sdb2 [0];
+  }
+}
+  7 初始化drbd
+  drbdadm create-md data
+  drbdadm up data
+  cat /proc/drbd
+  特别说明:
+  drbd有内部和外部模式，大多数都用内部模式，centos 6.0以上建议使用内部模式
+  如果使用内部模式，是不需要分区的，
+  8 设置主，同步数据到对端
+  #data-1-1上执行，不能再data-1-2上执行
+  drbdadm -- --overwrite-data-of-peer primary data
+  9 挂载写入数据
+  #data-1-1上的操作
+  mkfs.ext4 -b 4096 /dev/drbd0
+  tune2fs -c -1 /dev/sdb1
+  mkdir /md1
+  mount /dev/drbd0 /md1
+  mount /dev/sdb2 /mnt
+  cd /md1
+  for n in `seq 10`;do cp /bin/cat oldboy$n;done
+  ls -l
+  #data-1-2上格式化磁盘分区
+  mkdir /md1
+  drbdadm down data
+  mount /dev/sdb1 /md1
+  --------------------------
+  umount /md1
+  drbdadm up data
+  -------------------------
+  chkconfig drbd off
+  chkconfig --list drbd
+1.7 配合heartbeat调试drbd服务
+  需要执行相关切换命令确保heartbeat服务及drbd服务之间的配合是正确的才能继续向下进行，这类似
+  项目阶段的里程碑，成功配置drbd服务，并且能配合heartbeat服务进行主备切换时第二步的关键，成功配置drbd，并且能配合heartbeat服务进行主备切换时第二步的关键，下面是此处测试时的haresources配置:
+  cat /etc/ha.d/haresources
+  nfs-1-1 IPaddr::10.0.0.17/24/eth0 drbddisk::data Filesystem::/dev/drbd0::/data::ext3
+  配置参数的说明:
+  #nfs-1-1 <=为主机名，表示初始化状态会在nfs-1-1绑定ip 10.0.0.17
+  #IPaddr <=为heartbeat配置ip的默认脚本，其后的ip等都是其参数
+  #10.0.0.17/24/eth0 <=为集群对外服务的vip，初始启动在nfs-1-1上，#24为子网掩码，#eth0为ip
+  绑定的实际物理网卡，为heartbeat提供对外服务的通信接口，nfs-1-1 IPaddr::10.0.0.17/24/eth0
+  这一段配置相当于执行/etc/ha.d/resource.d/IPaddr 10.0.0.17/eth0 stop/start
+  #drbddisk::data <=启动drbd data资源，drbddisk::data 这段内容这里相当于执行/etc/ha.d/resource.d/drbddisk data stop/start 相当于drbdadm data,drbdadm primary data
+  Filesystem::/dev/drbd0::/data::ext3 <=drbd分区挂载到/data目录，这里相当于执行/etc/ha.d/re
+  source.d/Filesystem /dev/drbd0 /data ext3 stop/start 相当于 mount -t ext3 /dev/drbd0 /data
+  #rsdata <=启动nfs服务脚本，这里相当于执行/etc/init.d/rsdata stop/start,其实，就是我们前面
+  课程中的/data/3306/rsdata start或者/etc/init.d/rsdata start
+  #在data-1-1和data-1-2两台服务器修改/etc/haresources文件内容，添加如下内容
+  data-1-1 IPaddr::10.0.0.17/24/eth0 drbddisk::data Filesystem::/dev/drbd0::/md1::ext4
+  注:有关haresource更详细的说明见后文附录
+  #分析heartbeat启动资源的流程
+  1)IPaddr::10.0.0.17/24/eth0(/etc/ha.d/resource.d/IPaddr 10.0.0.17/24/eth0 start) #配置了一个vip是10.0.0.17
+  2)drbddisk::data(/etc/ha.d/resource.d/drbddisk data stop/start)
+  3)Filesystem::/dev/drbd0::/data::ext3(/etc/ha.d/resource.d/Filesystem /dev/drbd0 /data ext3 stop/start)
+  #启动heartbeat服务
+  >/var/log/ha-debug.log
+  >/var/log/ha-log.log
+  /etc/init.d/heartbeat start
+
+1.8 主节点上判断heartbeat配合drbd成功启动3要素
+  1)主节点上的vip是否正常启动
+  ip addr | grep 10.0.0.17
+  inet 10.0.0.17/24 brd 10.0.0.255 scope global secondary eth0
+  2)主节点上drbd服务角色是否为Primary/Secondary状态
+  cat /proc/debd
+  ... ...
+  0: cs:Connected ro:Primary/Secondary ds:UpToDate/UpToData C r-----
+  ... ...
+  提示上面结果说明drbd角色及同步状态正常
+  3)主节点上drbd分区是否被自动正确挂载
+   df -h
+   ... ...
+   /dev/drbd0      962M  18M 895M 2% /md1
+   ... ...
+1.9 切换后备节点上判断hertbeat配合drbd成功启动3要素
+  当主节点宕机后，备节点正常接管的3个关键查看要素
+  1)备节点上vip是否正常启动
+  ip addr | grep 10.0.0.17
+  inet 10.0.0.17/24 brd 10.0.0.255 scope global secondary eth0
+  2)备节点上drbd服务角色是否为Primary/Unknown状态
+  cat /proc/debd
+  ... ...
+  0: cs:Connected ro:Primary/Unknown ds:UpToDate/UpToData C r-----
+  3)备节点上drbd分区是否被自动正确挂载
+   ... ...
+   /dev/drbd0      962M  18M 895M 2% /md1
+   ... ...  
+1.10 裂脑的故障处理
+  当两端的服务器的状态是0: cs:Connected ro:Primary/Unknown ds:UpToDate/UpToData C r-----
+  说明两端的drbd服务器处于脑裂状态
+  解决办法:
+  1)在从节点如下操作:
+  modprobe drbd <这一步可以省略>
+  drbdadm secondary data<这一步可以省略>
+  drbdadm up data<这一步可以省略>
+  drbdadm disconnect data
+  drbdadm -- --discard-my-data connect data
+  2)在主节点上，通过cat /proc/drbd查看状态，如果不是WFConnection状态，需要再手动连接；
+  drbdadm connect data
+1.11 故障排查思路
+  模拟heartbeat软件自动调用相关脚本命令顺序的执行过程，现在通过手工挨个顺序启动查看
+  1)执行启动VIP的脚本
+  /etc/ha.d/resource.d/IPaddr 10.0.0.17/24/eth0 start #查看vip是否可以顺利启动
+  2)执行drbddisk脚本
+  /etc/ha.d/resource.d/drbddisk data start
+  cat /proc/drbd
+  3)执行Filesystem脚本对drbd分区进行挂载
+  /etc/ha.d/resource.d/Filesystem /dev/drbd0 /data/ ext3 start
+  故障1：
+  2013/01/19_17:10:57 ERROR Couldn't mount filesystem /dev/drbd0 on /data
+  2013/01/19_17:10:57 ERROR Generic error
+  ERROR: Generic error
+  结论:原来是这里报错了，和heartbeat自动挂载时的错误一样。看来确实有问题了
+  手工挂载以下drbd分区看看
+  mount /dev/drbd0 /data
+  结论:上面的错误应该比较清晰了，原来是/dev/drbd0设备对应的物理分区/dev/sdb1没有格式化
+  解决办法:把/dev/drbd0设备对用的物理分区/dev/sdb1格式化就OK了
+1.12 heartbeat配合drbd联合调试下个结论
+  对于heartbeat配合drbd调试的一个结论:
+  主或者备用节点由heartbeat控制的资源的启动顺序是相同的，资源的启动顺序为:
+  1)VIP的启动，2)drbd启动的设置，3)drbd分区的挂载
+  发生切换时注或者备节点释放资源的顺序是相同的，但是和上面启动的顺序是相反的，资源释放的顺序为
+  1)drbd分区卸载，2)drbd服务角色等变成slave，3)VIP的停止
+1.13 排查heartbeat高可用服务的方法小结
+  根据heartbeat的日志文件以及heartbeat原理及启动资源的顺序去排查问题
+  排查的方法就是启动heartbeat服务，heartbeat加载脚本资源的顺序手动启动排查
+  1)配置VIP
+  /etc/ha.d/resource.d/IPaddr 10.0.0.17/24/eth0 start
+  2)配置drbd
+  /etc/ha.d/resource.d/drbddisk data start
+  3)挂载drbd分区到/data目录
+  /etc/ha.d/resource.d/Filesystem /dev/drbd0 /data ext3 start
+  4)启动nfs存储系统服务
+  /etc/init.d/rsdata start
+2.1 NFS服务安装配置
+2.1.1 挂载drbd0分区到/md1目录
+  mount /dev/drbd0 /md1
+  提示:这是drbd分区挂载方法，不能直接把物理分区挂载到挂载点.
+2.1.2 安装NFS存储系统
+  说明:本文仅仅对涉及NFS高可用的部分加以说明，有关NFS服务的细节，请读者参考前面的文章
+2.1.2.1 检查nfs软件安装情况
+  rpm -aq nfs-utils rpcbind
+  #如果检测到没有安装过该软件包就是用如下命令
+  yum install -y nfs-utils rpcbind
+  /etc/init.d/rpcbind start
+  /etc/init.d/nfs start
+  chkconfig rpcbind on
+  chkconfig nfs on
+  提示:以上NFS的安装在data-1-1和data-1-2上都要配置
+2.1.2.2 通过配置文件配置NFS服务
+  NFS主服务器(data-1-1)上的操作
+  rpcinfo -p localhost
+  vim /etc/exports添加如下配置内容
+  /md1   10.0.0.*(rw,sync)
+  /data   192.168.100.*(rw,sync)
+  /etc/init.d/nfs reload 
+  showmount -e 10.0.0.7
+  chmod -R 777 /md1
+  NFS从服务器(data-1-2)上的操作
+  rpcinfo -p localhost
+  vim /etc/exports添加如下配置内容
+  /md1   10.0.0.*(rw,sync)
+  exportfs -r
+  showmount -e 10.0.0.8
+2.1.2.3 客户端测试NFS挂载服务
+  yum groupinstall "NFS file server"
+  /etc/init.d/rpcbind start
+  chkconfig rpcbind on
+  showmount -e 10.0.0.17
+  mkdir /md1
+  chmod -R 777 /md1
+  mount -t nfs 10.0.0.17:/md1 /md1
+  echo "mount -t nfs 10.0.0.17:/md1 /md1" >>/etc/rc.local
+  ls /md1
+2.1.2.4 网上流行的NFS高可用切换方案
+  #先写一个模拟写数据的脚本
+  #!/bin/bash
+  while true; do
+    for n in `seq 10 1000`
+    do
+      touch /md1/oldboy-$n
+      sleep 2
+    done
+   sh nfs_add.sh &
+   #网上流行的NFS高可用切换方案<data-1-1和data-1-2>
+   cat >/etc/ha.d/resource.d/killnfsd<< EOF
+   for n in {1..10}
+   do
+     killall -9 nfsd
+   done
+     sleep 2
+     /etc/init.d/nfs restart
+     exit 0
+   EOF
+   chmod +x /etc/ha.d/resource.d/killnfsd
+   #修改heartbeat的配置文件的内容,添加以下配置内容<data-1-1和data-1-2>
+   vim /etc/ha.d/haresources
+   data-1-1 IPaddr::10.0.0.17/24/eth0 drbddisk::data Filesystem::/dev/drbd0::/md1::ext4 killnfsd 
+   /etc/init.d/heartbeat stop
+   /etc/init.d/heartbeat start
+2.1.2.5 通过手工测试exportfs方式NFS的高可用切换
+   1)确保data-1-1和data-1-2上nfs服务正常
+   2)修改/etc/exports文件内容为以下
+    #/md1   10.0.0.*(rw,sync)<将该配置内容注释掉>
+   3)使用exportfs命令添加共享目录<data-1-1,data-1-2上配置>
+   exportfs -o rw,sync,all_squash,anonuid=65534,anongid=65534,mp,fsid=2 10.0.0.0/24:/md1
+   showmount -e 10.0.0.7
+   4)客户端挂载测试
+   mount -t nfs 10.0.0.17:/md1 /md1
+2.1.2.6 rsdata数据nfs存储系统启动脚本说明
+   rsdata数据nfs存储系统启动脚本就是前面课程中的通过exportfs写的启动脚本而已，可以在haresources里配置的脚本命令必须支持/etc/init.d/rsdata start/stop这样的启动和停止方式才行
+   以下配置文件的内容要在etc/ha.d/resource.d/目录下配置
+   #centos 5上的脚本
+   
+   #!/bin/bash
+   # exportfs
+   #
+   #################################################
+   #this scripts is create by oldboy
+   #oldboy QQ:286937899
+   #site:http://www.etiantian.org
+   #blog:http://oldboy.blog.51cto.com
+   ##################################################
+   FSID="1"
+   EXPORT_DIR="/data"
+   EXPORT_OPTIONS="-o rw,sync,all_squash,anonuid=65534 anongid=65534 fsid=$FSID"
+   EXPORT_CLIENTS="10.0.0.0/24"
+   backup_rmtab() {
+     grep ${EXPORT_DIR} /var/lib/nfs/rmtab >${EXPORT_DIR}/.rmtab
+
+   }
+   client_rmtab() {
+     REMOVE==`echo ${EXPORT_DIR}|sed `s/\//\\\\\//g'
+     sed -i -e /${REMOVE}/d /var/lib/nfs/rmtab
+
+   }
+   exportrf_usage() {
+     cat <<END
+     USAGE:$0 {start|stop|monitor|status|validate-all}
+   END
+   }
+   exportfs_monitor() {
+     fn="`/bin/mktemp`"
+     grep "${EXPORT_DIR}" /var/lib/nfs/etab >$fn 2>&1
+     rs=$?
+     rm -rf $fn
+     if [ $rc -eq 0 ]; then
+       echo "resource '${EXPORT_DIR}' is up."
+       exit 0
+     elif [ $rc -eq 1]; then
+       echo "resource '${EXPORT_DIR}' is down."
+       exit 1
+     else 
+       echo "resource '${EXPORT_DIR}' is error."
+       exit 2
+     fi
+   }
+   exportfs_start() {
+     fn="`/bin/mktemp`"
+     /etc/init.d/nfs restart
+     sleep 2
+     exportfs ${EXPORT_OPTIONS} ${EXPORT_CLIENTS}:${EXPORT_DIR} >$fn 2>&1
+     rs=$?
+     #restore save rmtab backup from other server
+     if [ -f ${EXPORT_DIR}/.rmtab ]; then
+       cat ${EXPORT_DIR}/.rmtab >>/var/lib/nfs/rmtab
+       rm -f ${EXPORT_DIR}/.rmtab
+     fi
+     /bin/bash $0 backup &
+     #error exportfs
+     if [ $rc -ne 0 ]; then
+       echo "export resource '${EXPORT_DIR}' error."
+       exit $rc
+     fi
+     rm -f $fn
+     echo "export resource '${EXPORT_DIR}' OK."
+     exit 0
+   }
+   exportfs_stop()
+   {
+     fn="`/bin/mktemp`"
+     /etc/init.d/nfs restart
+     exportfs -u ${EXPORT_CLIENTS}:${EXPORT_DIR} > $fn 2>&1
+     rc=$?
+     if [ -f ${EXPORT_DIR}/.exportfs_backup.pid ]; then
+             kill `cat ${EXPORT_DIR}./exportfs_backup.pid`
+             rm -f ${EXPORT_DIR}/.exportfs_backup.pid
+     fi
+     backup_rmtab
+     clean_rmtab
+     if [ $? -eq 0 ]; then
+       echo "unexport resource ${EXPORT_DIR} OK."
+       exit 0
+     fi 
+     rm -f $fn
+     echo "unexport resource ${EXPORT_DIR} error."
+     exit $rc
+   }
+   exportfs_backup() {
+     echo $$ >${EXPORT_DIR}/.exportfs_backup.pid
+     while [ 1 ]; do
+       backup_rmtab
+       sleep 2
+     done
+   }
+   exportfs_validate() {
+     if [ -d ${EXPORT_DIR} ]; then
+       return 0
+     else
+       echo "export resource ${EXPORT_DIR} not exists."
+       exit 1
+     fi
+   }
+   if [ $# -ne 1 ]; then
+     exportfs_usage
+     exit 1
+   fi
+ case $1 in
+   start)
+         exportfs_start
+         ;;
+   stop)
+        exportfs_stop
+        ;;
+   monitor)
+        exportfs_monitor
+        ;;
+   status)
+        exportfs_monitor
+        ;;
+   backup)
+        exportfs_backup
+        ;;
+   validate-all)
+        exportfs_validate
+        ;;
+    *)
+        exportfs_usage
+        exit 1
+        ;;
+  easc
+  #centos 6以上的脚本
+
+  #!/bin/bash
+   # exportfs
+   #
+   #################################################
+   #this scripts is create by oldboy
+   #oldboy QQ:286937899
+   #site:http://www.etiantian.org
+   #blog:http://oldboy.blog.51cto.com
+   ##################################################
+   FSID="1"
+   EXPORT_DIR="/data"
+   EXPORT_OPTIONS="-o rw,sync,all_squash,anonuid=65534 anongid=65534 fsid=$FSID"
+   EXPORT_CLIENTS="10.0.0.0/24"
+   exportrf_usage() {
+     cat <<END
+     USAGE:$0 {start|stop|monitor|status|validate-all}
+   END
+   }
+   exportfs_start() {
+     fn="`/bin/mktemp`"
+     /etc/init.d/nfs restart
+     sleep 2
+     exportfs ${EXPORT_OPTIONS} ${EXPORT_CLIENTS}:${EXPORT_DIR} >$fn 2>&1
+     rs=$?
+     #error exportfs
+     if [ $rc -ne 0 ]; then
+       echo "export resource '${EXPORT_DIR}' error."
+       exit $rc
+     fi
+     rm -f $fn
+     echo "export resource '${EXPORT_DIR}' OK."
+     exit 0
+   }
+   exportfs_stop()
+   {
+     fn="`/bin/mktemp`"
+     /etc/init.d/nfs restart
+     exportfs -u ${EXPORT_CLIENTS}:${EXPORT_DIR} > $fn 2>&1
+     rc=$?
+     if [ -f ${EXPORT_DIR}/.exportfs_backup.pid ]; then
+             kill `cat ${EXPORT_DIR}./exportfs_backup.pid`
+             rm -f ${EXPORT_DIR}/.exportfs_backup.pid
+             [ $? -eq 0 ] && echo "unexport resource ${EXPORT_DIR} OK." && exit 0
+     fi
+     rm -f $fn
+     echo "unexport resource ${EXPORT_DIR} error."
+     exit $rc
+   }
+   if [ $# -ne 1 ]; then
+     exportfs_usage
+     exit 1
+   fi
+ case $1 in
+   start)
+         exportfs_start
+         ;;
+   stop)
+        exportfs_stop
+        ;;
+   monitor)
+        exportfs_monitor
+        ;;
+   status)
+        exportfs_monitor
+        ;;
+   backup)
+        exportfs_backup
+        ;;
+   validate-all)
+        exportfs_validate
+        ;;
+    *)
+        exportfs_usage
+        exit 1
+        ;;
+  easc
+  chmod +x rsmd1
+  /etc/ha.d/resource.d/rsmd1 start
+  2)在客户端挂载进行测试
+  mount -t nfs 10.0.0.17:/md1 /md1
+  cd /md1
+  touch ddd
+  rm -rf ddd
+  3)在data-1-1和data-1-2上修改配置haresources文件的内容为以下内容
+  vi /etc/ha.d/haresources
+  data-1-1 IPaddr::10.0.0.17/24/eth0 drbddisk::data Filesystem::/dev/drbd0::/md1::ext4 rsmd1
+  修改后保存修改结果后，退出
+2.1.2.7 NFS高可用服务双主多从切换
+  注意:inotify或者sersync实时的同步，都要交给heartbeat控制，而不是事先启动.
+2.1.2.8 NFS高可用方案
+  1)客户端，监控本地读NFS,如果读不了，重新挂载
+  2)监控nfs服务端备节点是否有VIP出现或者状态变成Primary，如果有，重新挂载
+  3)NFS服务切换时，通过SSH等机制remount挂载的客户端
+  1:在nfs客户端监控挂载的NFS目录不正常时，进行重新挂载(定时任务或者守护进程)
+  2:在客户端使用autofs,有访问就mount,没有访问就umount(如果在读写量比较多，该方案不要去使用)
+  3:利用监控，使用nagios，如果备用节点出现vip，就执行一个批量脚本进行多台服务器remount
+  1)nfs高可用重新remount 方案
+  1:结合heartbeat自定义脚本，利用SSH-KEY免密码远程登录执行remount
+  2:前端web去检测后端的vip(判断MAC地址改变或rpcinfo取判断端口改变)
+2.2 使用drbd工具迁移包含大量小文件存储服务的生产实战案例
+2.2.1 大数据碎文件扩容迁移解决方案 
+  目标:10T的碎文件(10-500k)数据需要局域网从一台迁移到另一台存储
+2.2.1.1 用什么方案
+  1)rsync直接传
+  2)tar+(rsync,nc,ssh,ftp,http)
+  3)插硬盘对拷(前提硬盘足够大，有多余的接口)
+  4)drbd可以? <=这是我们要将的方案
+2.2.1.2 采用基于drbd软件迁移扩容方案(设置平滑迁移)
+  如果采用drbd同步方案，同步后备用节点会和主节点一样大小，即主节点10T,备节点20T,drbd同步后
+  ，发现备用节点就变成了10T空间，剩下的10T即看不到也没法用，那么如何解决这个棘手问题
+  给大家提个醒，请大家提前总结以下 fcsk,fdisk,e2fsck,partprobe,resize2fs,tune2fs等命令的工
+  作原理
+  我们就是利用这几个命令来扩容DRBD同步后备节点的
+2.3 通过DRBD软件再现迁移扩容问题
+  drbd的配置文件内容如下
+2.4 解决drbd同步分区后分区容量限制实战过程
+  我们演示的是针对于centos 5 ext3文件系统的情况，并且，假定事先已经对数据做了完整备份
+  补充:centos6.4 ext4依然可用
+2.4.1 卸载drbd所在物理分区的一切使用
+  1)卸载drbd设备挂载点
+  umount /mnt
+  drbdadm down data
+  e2fsck -f /dev/sdb1 #强制检查/dev/sdb分区
+  resize2fs /dev/sdb1
+  mount /dev/sdb /mnt
+  df -h
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+   
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+
+
+
+
+
+
