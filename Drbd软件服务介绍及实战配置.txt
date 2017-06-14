@@ -1,0 +1,442 @@
+                                  Drbd软件服务介绍及实战配置
+1.1Drbd 介绍
+1.1.1 什么是Drbd?
+  Distributed Replicated Block Device(DRBD)是基于块设备在不同的高可用服务器对之间同步镜像数据的软件，通过它可以实现在网络中的两台服务器之间基于块设备级别的实时或异步镜像和同步复制，其实就类似于rsync+inotify这样的架构项目软件，只不过drbd是基于文件系统底层的，即block层级同步，而rsync+intofy是在文件系统之上的实际物理文件的同步，因此，drbd的效率更高，效果更好
+  提示：上文提到的块设备可以是磁盘分区，LVM逻辑卷，或整块磁盘等
+1.2.1 DRBD的工作原理
+1.2.1.2 DRBD工作原理介绍
+  讲解raid1,引入drbd的作用.
+  DRBD软件工作位置是在文件系统层级以下，比文件系统更加靠近系统内核及IO栈，在基于DRBD的高可用(HA)两台服务器主机中，当我们将数据写入到本地磁盘系统时，数据还会被实时的发送到网络中的另一台主机上，并以相同的形式记录在另一台磁盘系统中，使得本地(主节点)与远程主机(备节点)的数据保持实时数据同步，这时，如果本地系统(主节点)出现故障，那么远程主机(备节点)上还会保留有一份和主节点相同的数据，数据备份可以继续使用，不但数据不会丢失，还会提升访问数据的用户访问体验(直接接管提供服务,降低宕机修复时间,DRBD服务的作用类似于磁盘阵列里的raid1功能，就相当于把网络中的两台服务器做成了类似磁盘阵列里的raid1一样
+  在高可用(HA方案)中使用DRBD功能，可以代替使用一个共享盘阵，因为数据同时存在与本地主机和
+  远程主机上，发生故障转移切换时，远程主机只要使用备机上面的那份备份数据(和主节点宕机前的
+  数据一致)，就可以继续提供服务而不会发生于故障前数据不一致的问题
+1.2.2 DRBD的工作原理图
+      DRBD的工作原理图.jpg
+      配合heartbeat工作图.jpg
+1.3.1 drbd的功能说明
+1.3.1.1 同步镜像重要数据
+  如前所述，DRBD是工作在磁盘分区，LVM逻辑卷等设备的上面，它可以通过复制数据块的方式把数据从本地磁盘同步到远端的服务器磁盘内。
+  DRBD有实时和异步两种同步模式：
+  1)实时同步模式
+  当数据写入到本地磁盘和远端所有服务器磁盘都成功后才会返回成功写入，DRBD服务的协议C级别就是这种同步模式，可以防止本地和远端数据丢失和不一致，此种模式是在生产环境中最常用的模式
+  2)异步同步模式:
+  当数据写入到本地服务器成功后返回成功写入，不管远端服务器是否写入成功，
+  还可能是数据写入到本地服务器或远端的BUFFER成功后，返回成功，这是DRBD服务的协议A,B级别
+  小提示:在讲到nfs网络文件系统的时候也有类似的参数和功能，例如:nfs服务的参数sync和async,mount挂载参数也有sync和async
+  本节内容来自http://www.drbd.org/home/mirroring
+1.3.1.2 仅仅主节点可以提供访问
+1.3.1.3 DRBD生产应用模式
+  单主模式:及主备模式，为典型的高可用性集群方案
+  复主模式：需要采用共享cluster文件系统，如GFS和OCFS2,用于需要从2个节点并发访问数据的场合
+  需要特别配置
+1.3.1.4 DRBD的3中同步复制协议
+  协议A;异步复制协议，本地写成功后立即返回，数据放在发送buffer中，可能丢失
+  协议B:内存同步(半同步)复制协议，本地写成功并将数据发送到对方后立即返回。如果双机掉电，
+  数据可能丢失
+  协议C:同步复制协议，本地和对方服务器磁盘都写成功确认后返回成功。如果单机掉电或单机磁盘损坏，则数据不会丢失工作中一般用协议C，选择协议将影响流量，从而影响网络时延
+1.2.4 DRBD的企业应用场景
+  生产环境中DRBD常用于基于高可用服务器对之间的数据同步解决方案
+  例如：heartbeat+DRBD+NFS/MFS/GFS,heartbeat+DRBD+mysql/oralce等，实际上DRBD可以配合任意需要数据同步的所有服务的应用场景
+  问题：
+1.2.5 相关数据同步工具介绍
+  rsync(sersync,inotify,isyncd)
+  scp(sersync,inotify,isyncd)
+  nc
+  nfs(网络文件系统)
+  union 双机同步
+  csync2 多机同步
+  软件的自身同步机制(mysql,oracle.mongdb,ttserver,redis...),把文件数据库，同步到从库，再把
+  文件拿出来
+  DRBD
+1.3 部署DRBD服务需求描述
+1.3.1 业务需求描述
+  结合就业班架构图描述，
+  假设有两台服务器data-1-1/data-1-2,其实际的ip地址分别为10.0.0.27(data1-1),10.0.0.8(data-1-2)配置目标：两台服务器分别配置好drbd服务后,实现在data-1-1机器上/dev/sdb分区上写入数据,数据会实时的同步到data-1-2机器上，一旦服务器data-1-1机器宕机或硬盘损坏导致数据不可用,data-1-2机器上的数据此时是data-1-1机器上的一个完整备份，当然，不光是一个完整的备份，还可以瞬间接替
+  损坏数据或宕机的data-1-1机器的一个完整备份，当然，不光是一个完整备份，还可以瞬间接替损坏
+  数据或宕机的data-1-1机器，实现了数据的异步实时同步，从而达到数据高可用无业务影响的目的
+  提示:本文讲解的是drbd主备模式，即应用时只在主的一端写入数据，备的一端处于数据热备状态，备用节点drbd的分区是不可见的，也就是出于非活动状态，不能人为写入数据，这一点大家理解了，
+  多drbd分区主主的双向同步模式，实际生产环境中，也可以配置主主模式，即只在主的一端
+1.3.2 drbd的部署结构图
+  drbd主备模式图.jpg
+  drbd主主模式.jpg
+   1)drbd服务通过直连线或以太网实时互相数据同步
+   2)两台存储服务器互相备份，正常情况下两端各提供一个主分区供NFS使用
+   3)存储服务期之间，存储服务器和交换机之间都是双千兆网卡绑定
+   4)应用服务器通过nfs访问存储
+  提示:在生产环境中，一般drbd服务不是孤立存在使用的，而是和一些软件结合使用，如NFS,MFS等等
+  NFS或MFS利用drbd的特性进行两台数据服务器间的实时数据同步，加上高可用工具heartbeat就可以实现共享存储服务器的高可用性，此时heartbeat会通过串口线或直连线对存储服务器做健康检查，同时
+  控制drbd，NFS,虚拟ip等资源的动态切换，在一端服务器故障时，进行资源的自动转移，确保达到高可用的目的。
+1.3.3 DRBD服务器硬件配置
+  DELL R710服务器2台，具体配置为
+  --------------------------------------------------------------------------------------
+  |设备名称        |   配置描述                                                        |
+  --------------------------------------------------------------------------------------
+  |CPU             |两颗，四核至强处理器Inter(R)Xeon(R)CPU E5606 @2.13GHZ              |
+  --------------------------------------------------------------------------------------
+  |MEM             |16GB(4*8GB)667MHZ                                                  |
+  --------------------------------------------------------------------------------------
+  |Raid            |SAS/SATA Raid 10 SAS6I Raid卡(支持1/0/5/6/10)                      |
+  --------------------------------------------------------------------------------------
+  |disk            |600GB*6 3.5英寸 SAS硬盘 15K                                        |
+  --------------------------------------------------------------------------------------
+  |网卡            |集成4个Broadcom千兆网卡，支持TOE功能                               |
+  --------------------------------------------------------------------------------------
+  硬件RAID 10配置：请参考<<raid介绍及DELL服务器raid制作指南>>
+  提示:实践模拟环境需要单独增加一块磁盘及网卡！
+1.3.4 操作系统:centos5.4/6.4 64bit
+  ---------------------------------------------------------------------------------------
+  |操作系统                                 |其他                                       |
+  ---------------------------------------------------------------------------------------
+  |Centos-5.4-x86_54-bin-DVD.iso            |适合drbd8.3 yum                            |
+  ---------------------------------------------------------------------------------------
+  |Centos-6.4-x86_64-bin-DVD.iso            |适合drbd8.4                                |
+  ---------------------------------------------------------------------------------------
+1.3.5 drbd服务网卡及ip资源配置
+  原则上:drbd服务网卡的配置和heartbeat服务一样，但是无需外部ip
+  ---------------------------------------------------------------------------------------
+  |名称         |接口    | IP               | 用途                                      |
+  ---------------------------------------------------------------------------------------
+  |MASTER       |eth0    |10.0.0.7          |外网管理ip,用于WAN数据转发                 |
+  ---------------------------------------------------------------------------------------
+  |             |eth1    |10.0.10.7         |用于服务器间心跳连接以及数据同步(直连)     |
+  ---------------------------------------------------------------------------------------
+  |VIP          |        |10.0.0.17         |用户提供应用程序A挂载服务                  |
+  ---------------------------------------------------------------------------------------
+  |BACKUP       |eth0    |10.0.0.8          |外网管理ip，用于WAN数据转发                |
+  ---------------------------------------------------------------------------------------
+  |             |eth1    |10.0.10.8         |用于服务器间心跳连接以及数据同步(直连)     |
+  ---------------------------------------------------------------------------------------
+  |vip          |        |10.0.0.18         |用于提供应用程序B挂载服务                  |
+  ---------------------------------------------------------------------------------------
+  提示：内外网ip分配可采用最后8为相同的方式，这样便于管理，另外，存储服务器之间，存储服务器和交换机之间都是双千兆网卡绑定，提升网卡性能
+1.3.6 实施基础准备
+  搭建虚拟机模拟真实环境
+  为了让大家在没有生产环境的情况下也可以学习本章内容，因此，本文特别为大家定制了Linux虚拟机环境来进行试验
+  1)环境搭建的条件
+  两端的DRBD服务器必须是双网卡，双硬盘
+  2)下载并安装epel包
+  wget http://mirrors.ustc.edu.cn/fedora/epel/6/x86_64/epel-release-6-8.noarch.rpm
+  rpm -vih epel-release-6-8.noarch.rpm
+  rpm -qa |grep epel
+  3)配置主机名与域名解析
+  hostname data-1-1
+  sed -i 's@HOSTNAME=.*@HOSTNAME=data-1-1@' /etc/sysconfig/network
+  hostname data-1-2
+  sed -i 's@HOSTNAME=.*@HOSTNAME=data-1-2@' /etc/sysconfig/network
+  cp /etc/hosts /etc/host_$(date +%F)
+  cat >>/etc/hosts<< EOF
+  10.0.10.7 data-1-1
+  10.0.10.8 data-1-2
+  EOF
+  4)关闭iptables和selinux
+  /etc/init.d/iptables stop
+  setenforce 0
+  sed -i 's@SELINUX=.*@SELINUX=disable@' /etc/selinux/config
+  5)配置时间同步
+  6)配置心跳主机路由
+  data-1-1 server上增减如下主机路由:
+  /sbin/route add -host 10.0.10.8 dev eth1
+  echo '/sbin/route add -host 10.0.10.8 dev eth1' >>/etc/rc.local
+  data-1-2 server上增加如下主机路由:
+  /sbin/route add -host 10.0.10.7 dev eth1
+  echo '/sbin/route add -host 10.0.10.7 dev eth1' >>/etc/rc.local
+  7)在两端的DRBD服务器上各增加一块磁盘(大小为512M(0.5GB))，并给该磁盘分区
+  首先，通过fdisk,mkfs.ext3,tune2fs等命令，对硬盘进行分区，分区信息如下表:
+  注*:具体名详情见我单独文档<<fdisk和mkfs命令详细实践总结>>一文，此处，略过。
+  特殊说明：本文为6块600GB硬盘做的一个大RAID5，总大小为2.7TB,在安装系统前做raid5后，又分出
+  了两个虚拟硬盘Disk /dev/sda:332.1GB(安装操作系统用)，和DISK /dev/sdb:2675.6GB(存储图片数据用)
+  因此，我们需要做的就是对/dev/sdb进行分区，需要分区的居图内容见下表
+  --------------------------------------------------------------------------------------
+  |DEVICE       |MOUNT POINT         |预期大小          | 作用                         |
+  --------------------------------------------------------------------------------------
+  |/dev/sdb1    |/data               |2665G             |存储全站图片数据              |
+  --------------------------------------------------------------------------------------
+  |/dev/sdb2    |meta data分区       |1G                |存储DRBD同步的状态信息        |
+  --------------------------------------------------------------------------------------
+  提示：
+  1)这里meta data分区一定不能格式化建立文件系统
+  2)格式化分的分区现在不能进行挂载
+  3)经验:生产环境下drbd meta data分区一般可设为1-2G,本文给了1G
+
+  如果是512M的磁盘，数据区可先分配384M，剩下的都默认
+  echo -e "n\np\n1\n\n+384M\nn\np\n2\n\n\nw"|fdisk /dev/sdb
+  如果是1GB的磁盘，数据区可先分配768M,剩下的都默认
+  echo -e "n\np\n1\n\n+768M\nn\np\n2\n\n\nw"|fdisk /dev/sdb
+  #格式化分区<sdb2不需要磁盘格式化>
+  mkfs.ext4 /dev/sdb1
+  tune2fs -c -1 /dev/sdb1
+  #挂载磁盘分区
+  mount /dev/sdb2 /mnt
+  提示:以上操作需要在两端的DRBD服务器上同时执行，如果磁盘分区超过2TB,建议分区只能用parted命令分区
+1.3.7 安装DRBD软件
+  安装centos 5.4 64bit(注:5.2版本的yum安装方式遇到不少问题)
+  安装drbd            yum install kmod-drbd83 drbd83 -y
+  使用yum安装，简单，快捷而性能不逊色与编译安装，推荐大家使用，当然要看情况，老男孩在本文软件的部署都是yum安装的，跑了几年都没任何问题，所以，才敢在这里推荐，大家选择yum/rpm还是编译，请慎重
+1.3.8 检查drbd安装情况
+  rpm -qa | grep drbd
+1.3.9 编译安装drbd
+  mkdir /home/oldboy/tools -p
+  cd /home/oldboy/tools
+  export LC_ALL=C
+  wget http://oss.linbit.com/drbd/8.4/drbd-8.4.4.tar.gz
+  ls drbd-8.4.4.tar.gz
+  tar xf drbd-8.4.4.tar.gz
+  cd drbd-8.4.4
+  ./configure --prefix=/application/drbd8.4.4 --with-km --with-heartbeat --sysconfdir=/etc/
+  #with-km   enable kernel module
+  #with-heartbeat   enable heartbeat integration
+  故障1：当执行./configure命令时出现如下故障现象 
+  configure: error: Cannot build utils without flex, either install flex or pass the --without-utils option.
+  解决办法：
+  yum install -y flex 
+  ls -ld /usr/src/kernels/$(uname -r)
+  如果该目录不存在，需要执行如下操作
+  yum install kernel-devel kernel-headers -y
+  make KDIR=/usr/src/kernels/$(uname -r)/ #指定内核源码路径  
+  故障1：当执行make KDIR=/usr/src/kernels/$(uname -r)/这个命令时出现以下错误，
+make -C drbd drbd_buildtag.c
+make[1]: Entering directory `/home/wpaccp/tools/drbd-8.4.4/drbd'
+make[1]: Leaving directory `/home/wpaccp/tools/drbd-8.4.4/drbd'
+make[1]: Entering directory `/home/wpaccp/tools/drbd-8.4.4/user'
+gcc -g -O2 -Wall -I../drbd -I../drbd/compat   -c -o drbdadm_scanner.o drbdadm_scanner.c
+In file included from /usr/include/errno.h:36,
+                 from drbdadm_scanner.c:22:
+/usr/include/bits/errno.h:25:26: error: linux/errno.h: No such file or directory
+In file included from /usr/include/sys/socket.h:40,
+                 from /usr/include/net/if.h:27,
+                 from drbdadm.h:8,
+                 from drbdadm_scanner.fl:6:
+/usr/include/bits/socket.h:377:24: error: asm/socket.h: No such file or directory
+In file included from drbdadm_scanner.fl:7:
+drbdtool_common.h:8:25: error: linux/major.h: No such file or directory
+drbdadm_scanner.c: In function 'yy_get_next_buffer':
+drbdadm_scanner.c:3426: error: 'EINTR' undeclared (first use in this function)
+drbdadm_scanner.c:3426: error: (Each undeclared identifier is reported only once
+drbdadm_scanner.c:3426: error: for each function it appears in.)
+make[1]: *** [drbdadm_scanner.o] Error 1
+make[1]: Leaving directory `/home/wpaccp/tools/drbd-8.4.4/user'
+make: *** [tools] Error 2
+ 解决办法：
+ 从以上故障可以看出，是由于没有安装kernel-headers这个软件包
+ rpm -ivh kernel-headers-2.6.32-431.el6.x86_64.rpm 
+ make install
+  
+  modprobe drbd
+  lsmod|grep drbd
+  drbd                  340743  0 
+  libcrc32c               1246  1 drbd
+  echo "modprobe drbd" >>/etc/rc.local
+
+1.4 理顺图片数据/data各配置列表
+  ----------------------------------------------------------------------------------------
+  |主机名称        |data-1-1                           |data-1-2                         |
+  ----------------------------------------------------------------------------------------
+  |管理ip          |eth0:10.0.0.7                      |eth0:10.0.0.8                    |
+  ----------------------------------------------------------------------------------------
+  |DRBD管理名称    |data                               |data                             |
+  ----------------------------------------------------------------------------------------
+  |DRBD挂载目录    |/data                              |/data                            |
+  ----------------------------------------------------------------------------------------
+  |DRBD逻辑设备    |/dev/drbd0                         |/dev/drbd0                       |
+  ----------------------------------------------------------------------------------------
+  |DRBD对接ip      |eth1:10.0.10.7/24                  |eth0:10.0.10.8/24                |
+  ----------------------------------------------------------------------------------------
+  |DRBD存储设备    |/dev/sdb1                          |/dev/sdb1                        |
+  ----------------------------------------------------------------------------------------
+  |DRBD Meta设备   |/dev/sdb2[0]                       |/dev/sdb2[0]                     |
+  ----------------------------------------------------------------------------------------
+  |NFS导出目录     |/data                              |/data                            |
+  ----------------------------------------------------------------------------------------
+  |NFS虚拟IP       |eth0:192.168.1.249/24              |eth0:192.168.1.249/24              
+  ----------------------------------------------------------------------------------------
+1.5 编辑配置drbd的配置文件drbd.conf
+  默认的配置路径/etc/drbd.conf,下面下给出本实例配置(主从)，更多详细配置见后文附录三
+  清空/etc/drbd.conf文件中内容，将以下配置内容添加到该配置文件当中<两端的drbd服务器都必须要
+  这样配置，并且配置文件的内容要相同>
+  global {
+      usage-count no;
+  }
+  common {
+    syncer {
+          rate 1000M;
+          verify-alg crc32c;
+    }
+  }
+  #primary for drbd1
+  resource data {
+    protocol C;
+    disk {
+      on-io-error    detach;
+    }
+    on data-1-1 {
+      device     /dev/drbd0;
+      disk       /dev/sdb1;
+      address    10.0.10.7:7788;
+      meta-disk  /dev/sdb2[0];
+    }
+    on data-1-2 {
+      device     /dev/drbd0;
+      disk       /dev/sdb1;
+      address    10.0.10.8:7788;
+      meta-disk  /dev/sdb2[0];
+    }
+  }
+  提示：如果有需要定义多个DRBD资源。你可以添加多个resource data { }
+1.6 Enabling DRBD 资源
+  注:下面每一步在主备两台机器上都要执行，这里仅以data-1-1为例
+  drbdadm create-md data
+常见故障:
+  故障1：当执行drbdadm create-md data后出现如下错误提示
+  /etc/drbd.conf:5:conflicting use of global section 'global'......
+  drbd.d/global_common.conf:1:global section 'global' first user here
+  从以上错误提示可以看出，是因为重复定义drbd.d/global_common.conf导致的
+  解决办法：删除drbd.d/global_common.conf这一行
+1.7 启动DRBD
+  drbdadm up all
+  提示：此处命令 drbdadm up all 或者 drbdadm up data 相当于如下三个命令的组合
+  drbdadm attach all
+  drbdadm syncer all
+  drbdadm connect all
+  cat /proc/drbd<data-1-1主服务器>
+  version: 8.4.4 (api:1/proto:86-101)
+  GIT-hash: 74402fecf24da8e5438171ee8c19e28627e1c98a build by root@data-1-1, 2017-06-02 23:59:18
+  0: cs:WFConnection ro:Primary/Unknown ds:UpToDate/DUnknown C r-----
+  ns:296 nr:0 dw:296 dr:1140 al:3 bm:7 lo:0 pe:0 ua:0 ap:0 ep:1 wo:f oos:0
+  cat /proc/drbd<data-1-2从服务器>
+  version: 8.4.4 (api:1/proto:86-101)
+  GIT-hash: 74402fecf24da8e5438171ee8c19e28627e1c98a build by root@data-1-2, 2017-06-03 00:07:37
+  0: cs:Connected ro:Secondary/Primary ds:UpToDate/UpToDate C r-----
+  ns:0 nr:0 dw:0 dr:0 al:0 bm:0 lo:0 pe:0 ua:0 ap:0 ep:1 wo:f oos:0
+
+常见故障：
+  故障1：当执行drbdadm up data 这个命令后，出现如下故障提示
+  /application/drbd8.4.4/var/run/drbd: No such file or directory
+  /application/drbd8.4.4/var/run/drbd: No such file or directory
+  0:Failure:(119) No valid meta-data signature found
+        ==>Use 'drbdadm create-md res' to initialize meta-data area <== 
+  Command 'drbdsetup attach 0 /dev/sdb1 /dev/sdb2 0 --on-io-error=detach --resync-rate=1000M' terminated with exit code 10
+  解决办法: mkdir /application/drbd8.4.4/var/run/drbd -p
+  重新分区，将数据区从384M修改成256M。剩下的磁盘全分剩下的分区 重启系统后(执行完partprobe,命令后在重启系统)
+  然后格式化数据区的分区后，然后在初始化drbd,启动DRBD
+故障2：当两端DRBD服务器上执行cat /proc/drbd 后出现两端DRBD服务器的状态都是secondary，
+解决办法:
+1)查看两端drbd服务器上路由表，有没有添加相关路由条目
+2)查看防火墙状态是否开启，如果开启防火墙，请关闭防火墙
+3)排查完故障后，一定要重启两端的DRBD服务(drbdadm down data,drbdadm up data)
+如果看到两端的DRBD状态已经变化，此时的状态如果是ro:Secondary/Secondary，表示两端都是从，处于无主状态
+1.8 同步DRBD数据到对端SERVER,使数据保存一致
+1.8.1 指定一个要同步的资源，同步数据到对端
+  说明：
+  1):如果为空硬盘，可以随意执行操作不需要考虑数据。
+  2)如果两边数据不一样(要特别注意同步数据的方向，否则可能丢失数据)
+1.8.2 一个资源只能在一端执行同步数据到对端的命令
+  drbdadm -- --overwrite-data-of-peer primary data
+  cat /proc/drbd
+  version: 8.4.4 (api:1/proto:86-101)
+  GIT-hash: 74402fecf24da8e5438171ee8c19e28627e1c98a build by root@data-1-1, 2017-06-02 23:59:18
+  0: cs:SyncSource ro:Primary/Secondary ds:UpToDate/Inconsistent C r-----
+    ns:1257472 nr:0 dw:0 dr:1258138 al:0 bm:76 lo:0 pe:0 ua:0 ap:0 ep:1 wo:f oos:1899272
+  [=======>............] sync'ed: 40.0% (1899272/3156744)K
+  finish: 0:00:47 speed: 39,680 (39,296) K/sec
+  提示：在DRBD的主服务器上操作以上命令,如果该命令执行完成后，主服务器的状态是
+  cat /proc/drbd
+  version: 8.4.4 (api:1/proto:86-101)
+  GIT-hash: 74402fecf24da8e5438171ee8c19e28627e1c98a build by root@data-1-1, 2017-06-02 23:59:18
+  0: cs:WFConnection ro:Primary/Unknown ds:UpToDate/DUnknown C r-----
+  ns:296 nr:0 dw:296 dr:1140 al:3 bm:7 lo:0 pe:0 ua:0 ap:0 ep:1 wo:f oos:0
+常见故障
+故障1：如果在数据同步过程中，在两端的DRBD服务器上执行cat /proc/drbd命令后，出现不能正常同步的故障，
+解决办法
+可以在DRBD从服务器上执行以下命令来解决故障
+drbdadm down data
+drbdadm up data
+1.8.3 DRBD常见故障问题的排查步骤
+  1)请检查两台DRBD服务器物理网络连接或者ip及主机路由是否正确
+  2)停止IPTABLES防火墙，或者放行drbd同步(可使用简单的ip允许的方法)
+  3)Secondary/Unknown还有可能是发生脑裂导致的结果
+  解决办法:
+  1:在从节点slave data-1-2上做如下操作:
+  drbdadm secondary data
+  drbdadm -- --discard-my-data connect data
+  2:在主节点master data-1-1上，通过cat /proc/drbd 查看状态，如果不是WFConnection状态，需要
+  手工连接
+  drbdadm connect data
+  cat /proc/drbd #查看两端状态
+  4)如果初始化配置不当，或则配置好进行其他意外处理等，如两端处于同步状态meta信息不对等也可
+  能会导致上面的错误
+  请大家牢记drbd正常时的状态，后文，我会带大家写脚本判断drbd的状态是否正常
+1.9 drbd 挂载测试数据库同步以及查看备节点的数据
+  在drbd主服务器上创建存储图片的目录 /data
+  mkdir /data
+  mount /dev/drbd0 /data #将drbd挂载设备挂载到/data这个挂载点上
+  提示：只有执行了主备服务器的数据同步之后，才能正常在主服务器端挂载drbd设备
+  cd /data
+  touch `seq 10`
+  cat /proc/drbd #查看drbd同步的状态
+  在drbd从服务器上的操作，并查看drbd服务的同步效果
+  drbdadm down data
+  mount /dev/sdb1 /mnt
+  ls -l
+1.10 drbd大数据的迁移出现DRBD两端分配的磁盘容量不相等的问题
+  扩容主/备物理数据盘：
+  [root@MySQL02 ~]# drbdadm down data
+  [root@MySQL02 ~]# mount /dev/sdb1 /mnt/
+  [root@MySQL02 ~]# df -h
+  Filesystem      Size  Used Avail Use% Mounted on
+  /dev/sda3       7.2G  1.9G  5.0G  28% /
+  tmpfs           242M     0  242M   0% /dev/shm
+  /dev/sda1       194M   57M  128M  31% /boot
+  /dev/sdb1       380M   11M  350M   3% /mnt    # 可以看到备节点磁盘利用率只有380M
+  [root@MySQL02 ~]# parted /dev/sdb p
+  Model: Msft Virtual Disk (scsi) 
+  Disk /dev/sdb: 2147MB
+  Sector size (logical/physical): 512B/512B
+  Partition Table: msdos
+  Number  Start   End    Size   Type     File system  Flags
+  1      32.3kB  814MB  814MB  primary  ext4    # 然而备节点真实大小为814M
+  2      814MB   979MB  165MB  primary
+  [root@MySQL02 ~]# umount /mnt/
+  [root@MySQL02 ~]# e2fsck -f /dev/sdb1     # 查看分区大小
+  e2fsck 1.41.12 (17-May-2010)
+  Pass 1: Checking inodes, blocks, and sizes
+  Pass 2: Checking directory structure
+  Pass 3: Checking directory connectivity
+  Pass 4: Checking reference counts
+  Pass 5: Checking group summary information
+  /dev/sdb1: 38/100744 files (0.0% non-contiguous), 22971/401409 blocks
+  [root@MySQL02 ~]# resize2fs /dev/sdb1    # 重新分配分区（扩容）
+  resize2fs 1.41.12 (17-May-2010)
+  Resizing the filesystem on /dev/sdb1 to 795184 (1k) blocks.
+  The filesystem on /dev/sdb1 is now 795184 blocks long.
+  [root@MySQL02 ~]# mount /dev/sdb1 /mnt/
+  [root@MySQL02 ~]# df -h
+  Filesystem      Size  Used Avail Use% Mounted on
+  /dev/sda3       7.2G  1.9G  5.0G  28% /
+  tmpfs           242M     0  242M   0% /dev/shm
+  /dev/sda1       194M   57M  128M  31% /boot
+  /dev/sdb1       752M   11M  703M   2% /mnt    # 备节点磁盘空间已增加至最大
+  [root@MySQL02 ~]# ls /mnt/
+  体验结果见附录十一:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
