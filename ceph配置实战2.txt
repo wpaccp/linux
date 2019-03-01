@@ -1,0 +1,488 @@
+                                              ceph后端存储配置实战
+ceph预设
+三台机器都要配置
+[root@linux-node1 ~]# hostname linux-node1
+[root@linux-node1 ~]# echo "linux-node1" >>/etc/hostname
+[root@linux-node2 ~]# hostname linux-node2
+[root@linux-node2 ~]# echo "linux-node2" >>/etc/hostname
+[root@linux-node3 ~]# hostname linux-node3
+[root@linux-node3 ~]# echo "linux-node2" >>/etc/hostname
+[root@linux-node1 ~]# vi /etc/hosts
+192.168.100.151 linux-node1 linux-node1.oldboyedu.com 
+192.168.100.152 linux-node2 linux-node2.oldboyedu.com 
+192.168.100.153 linux-node3
+[root@linux-node1 ~]# cd /etc/
+[root@linux-node1 etc]# scp hosts linux-node2:/etc/
+[root@linux-node1 etc]# scp hosts linux-node3:/etc/
+[root@linux-node1 ~]# systemctl stop firewalld.service
+[root@linux-node1 ~]# setenforce 0
+[root@linux-node1 ~]# id ceph
+[root@linux-node2 ~]# id ceph
+[root@linux-node3 ~]# id ceph
+[root@linux-node1 ~]# useradd -d /home/ceph -m ceph
+[root@linux-node1 ~]# echo "ceph ALL = (root) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/ceph
+[root@linux-node1 ~]# passwd ceph
+Changing password for user ceph.
+New password: 
+BAD PASSWORD: The password is shorter than 8 characters
+Retype new password: 
+passwd: all authentication tokens updated successfully.
+[root@linux-node2 ~]# passwd ceph
+Changing password for user ceph.
+New password: 
+BAD PASSWORD: The password is shorter than 8 characters
+Retype new password: 
+passwd: all authentication tokens updated successfully.
+[root@linux-node3 ~]# passwd ceph
+Changing password for user ceph.
+New password: 
+BAD PASSWORD: The password is shorter than 8 characters
+Retype new password: 
+passwd: all authentication tokens updated successfully.
+[root@linux-node1 ~]# chmod 0440 /etc/sudoers.d/ceph
+[root@linux-node1 ~]# visudo
+#修改配置文件如下
+... ...
+#
+# Disable "ssh hostname sudo <cmd>", because it will show the password in clear. 
+#         You have to run "ssh -t hostname sudo <cmd>".
+#
+#Defaults    requiretty
+Defaults:ceph !requiretty
+[root@linux-node1 ~]# wget -O /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+[root@linux-node2 ~]# wget -O /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+[root@linux-node3 ~]# wget -O /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo
+[root@linux-node1 ~]# cd /etc/yum.repo.d/
+[root@linux-node1 yum.repo.d]# vi ceph.repo
+[ceph]
+name=ceph
+baseurl=http://mirrors.aliyun.com/ceph/rpm-luminous/el7/x86_64/
+gpgcheck=0
+priority=1
+
+[ceph-noarch]
+name=cephnoarch
+baseurl=http://mirrors.aliyun.com/ceph/rpm-luminous/el7/noarch/
+gpgcheck=0
+priority=1
+[ceph-source]
+name=Ceph source packages
+baseurl=https://mirrors.aliyun.com/ceph/rpm-luminous/el7/SRPMS/
+enabled=0
+gpgcheck=1
+type=rpm-md
+gpgkey=http://mirrors.aliyun.com/ceph/keys/release.asc
+priority=1
+[root@linux-node1 ~]# yum clean all
+[root@linux-node1 ~]# yum makecache
+[root@linux-node1 ~]# yum repolist
+
+安装和配置ceph
+#在linux-node1上配置如下内容
+[ceph@linux-node1 ~]$ ssh-keygen -t rsa
+[ceph@linux-node1 ~]$ ssh-copy-id ceph@linux-node1
+[ceph@linux-node1 ~]$ ssh ceph@linux-node1
+[ceph@linux-node1 ~]$ ssh-copy-id ceph@linux-node2
+[ceph@linux-node1 ~]$ ssh ceph@linux-node2
+[ceph@linux-node1 ~]$ ssh-copy-id ceph@linux-node3
+[ceph@linux-node1 ~]$ ssh ceph@linux-node3
+[ceph@linux-node1 ~]$ sudo vim ~/.ssh/config
+Host linux-node1
+   Hostname linux-node1
+   User ceph
+Host linux-node2
+   Hostname linux-node2
+   User ceph
+Host linux-node3
+   Hostname linux-node3
+   User ceph
+
+[ceph@linux-node1 ~]$ sudo chmod 600 ~/.ssh/config
+[ceph@linux-node1 ~]$ sudo yum install yum-plugin-priorities 
+[ceph@linux-node1 ~]$ sudo yum install ceph-deploy
+[ceph@linux-node1 ~]$ sudo mkdir my-cluster 
+[ceph@linux-node1 ~]$ sudo cd my-cluster 
+[ceph@linux-node1 ~]$ sudo chown -R ceph.ceph /home/ceph/my-cluster/
+[ceph@linux-node1 my-cluster]$ ceph-deploy new linux-node1 linux-node2 linux-node3  
+[ceph@linux-node1 my-cluster]$ ceph-deploy install --no-adjust-repos linux-node1 linux-node2 linux-node3 
+[ceph@linux-node1 my-cluster]$ ceph-deploy mon create-initial
+[ceph@linux-node1 my-cluster]$ ceph-deploy disk zap linux-node1 /dev/sdb
+[ceph@linux-node1 my-cluster]$ ceph-deploy disk zap linux-node2 /dev/sdb
+[ceph@linux-node1 my-cluster]$ ceph-deploy disk zap linux-node3 /dev/sdb
+[ceph@linux-node1 my-cluster]$ sudo chmod +r ceph.client.admin.keyring
+[ceph@linux-node1 my-cluster]$ sudo cp -a /home/ceph/my-cluster/ceph.client.admin.keyring /etc/ceph/ceph.client.admin.keyring
+[ceph@linux-node1 my-cluster]$ vi ~/my-cluster/ceph.conf
+[global]
+fsid = 55b2d4e8-cb32-4edb-9cce-d32a64294503
+mon_initial_members = linux-node1, linux-node2, linux-node3
+mon_host = 192.168.100.151,192.168.100.152,192.168.100.153
+auth_cluster_required = cephx
+auth_service_required = cephx
+auth_client_required = cephx
+osd pool default size = 2
+mon clock drift allowed = 2
+mon clock drift warn backoff = 30
+[mon]
+mon allow pool delete = true
+[ceph@linux-node1 my-cluster]$ ceph-deploy --overwrite-conf config push linux-node{1..3}
+[ceph@linux-node1 my-cluster]$ sudo systemctl restart ceph-mon.target
+[ceph@linux-node1 my-cluster]$ sudo systemctl stauts ceph-mon.target
+[ceph@linux-node1 my-cluster]$ ceph-deploy osd create linux-node1 --data /dev/sdb
+[ceph@linux-node1 my-cluster]$ ceph-deploy osd create linux-node2 --data /dev/sdb
+[ceph@linux-node1 my-cluster]$ ceph-deploy osd create linux-node3 --data /dev/sdb
+[ceph@linux-node1 my-cluster]$ ceph-deploy mgr create linux-node1 linux-node2 linux-node3
+[ceph@linux-node1 my-cluster]$ ceph -s
+[ceph@linux-node1 my-cluster]$ vi ceph.conf
+[global]
+fsid = 55b2d4e8-cb32-4edb-9cce-d32a64294503
+mon_initial_members = linux-node1, linux-node2, linux-node3
+mon_host = 192.168.100.151,192.168.100.152,192.168.100.153
+auth_cluster_required = cephx
+auth_service_required = cephx
+auth_client_required = cephx
+osd pool default size = 2
+mon clock drift allowed = 2
+mon clock drift warn backoff = 30
+[mon]
+mon allow pool delete = true
+[ceph@linux-node1 my-cluster]$ ceph-deploy --overwrite-conf config push linux-node{1..3}
+[ceph@linux-node1 my-cluster]$ sudo systemctl restart ceph-mon.target
+[ceph@linux-node1 my-cluster]$ sudo systemctl stauts ceph-mon.target
+
+#创建文件系统
+#创建Ceph MDS角色
+[ceph@linux-node1 my-cluster]$ sudo modprobe rbd
+[ceph@linux-node1 my-cluster]$ sudo lsmod | grep rbd
+[ceph@linux-node1 my-cluster]$ sudo modprobe ceph
+[ceph@linux-node1 my-cluster]$ sudo lsmod | grep ceph
+#创建Ceph MDS角色
+[ceph@linux-node1 my-cluster]$ ceph-deploy --overwrite-conf mds create linux-node1
+[ceph@linux-node1 my-cluster]$ netstat -tnlp | grep mds
+#手动创建data和metadata两个池
+[ceph@linux-node1 my-cluster]$ ceph osd pool create cephfs_data 128
+[ceph@linux-node1 my-cluster]$ ceph osd pool create cephfs_metadata 128
+[ceph@linux-node1 my-cluster]$ ceph osd pool stats cephfs_data
+[ceph@linux-node1 my-cluster]$ ceph osd pool stats cephfs_metadata
+[ceph@linux-node1 my-cluster]$ ceph fs new cephfs cephfs_metadata cephfs_data
+[ceph@linux-node1 my-cluster]$ ceph fs ls
+[ceph@linux-node1 my-cluster]$ ceph mds stat
+
+[ceph@linux-node1 ~]$ mysql my-cluster/
+[ceph@linux-node1 my-cluster]$ vi ceph.conf
+[global]
+fsid = 55b2d4e8-cb32-4edb-9cce-d32a64294503
+mon_initial_members = linux-node1, linux-node2, linux-node3
+mon_host = 192.168.100.151,192.168.100.152,192.168.100.153
+auth_cluster_required = cephx
+auth_service_required = cephx
+auth_client_required = cephx
+osd pool default size = 2
+mon clock drift allowed = 2
+mon clock drift warn backoff = 30
+[mon]
+mon allow pool delete = true
+[ceph@linux-node1 my-cluster]$ sudo systemctl restart ceph-mon.target
+[ceph@linux-node1 my-cluster]$ sudo systemctl stauts ceph-mon.target
+[ceph@linux-node1 my-cluster]$ ceph -w
+  cluster:
+    id:     b86c386a-141f-4330-8267-2b15584bb915
+    health: HEALTH_OK
+ 
+  services:
+    mon: 3 daemons, quorum linux-node1,linux-node2,linux-node3
+    mgr: linux-node1(active), standbys: linux-node2, linux-node3
+    mds: cephfs-1/1/1 up  {0=linux-node1=up:active}
+    osd: 3 osds: 3 up, 3 in
+ 
+  data:
+    pools:   2 pools, 256 pgs
+    objects: 21 objects, 2246 bytes
+    usage:   3080 MB used, 58347 MB / 61428 MB avail
+    pgs:     256 active+clean
+ 
+
+2018-08-15 18:27:10.171244 mon.linux-node1 [INF] overall HEALTH_OK
+[ceph@linux-node1 my-cluster]$ ceph -s
+  cluster:
+    id:     b86c386a-141f-4330-8267-2b15584bb915
+    health: HEALTH_OK
+ 
+  services:
+    mon: 3 daemons, quorum linux-node1,linux-node2,linux-node3
+    mgr: linux-node1(active), standbys: linux-node2, linux-node3
+    mds: cephfs-1/1/1 up  {0=linux-node1=up:active}
+    osd: 3 osds: 3 up, 3 in
+ 
+  data:
+    pools:   2 pools, 256 pgs
+    objects: 21 objects, 2246 bytes
+    usage:   3080 MB used, 58347 MB / 61428 MB avail
+    pgs:     256 active+clean
+
+客户端挂载
+#用户空间挂载 CEPH 文件系统
+在linux-node3上执行如下配置
+[ceph@linux-node3 ceph]$ sudo yum install -y ceph-fuse.x86_6
+[ceph@linux-node3 ceph]$ sudo scp root@linux-node1:/home/ceph/my-cluster/ceph.conf /etc/ceph/ceph.conf
+[ceph@linux-node3 ceph]$ sudo scp root@linux-node1:/etc/ceph/ceph.client.admin.keyring /etc/ceph/ceph.client.admin.keyring
+[ceph@linux-node3 ceph]$ sudo mkdir /home/ceph/cephfs
+[ceph@linux-node3 ceph]$ sudo ceph-fuse -m 192.168.100.151:6789 /home/ceph/cephfs
+
+在linux-node1上执行如下配置
+[ceph@linux-node1 ceph]$ sudo yum install -y ceph-fuse.x86_6
+[ceph@linux-node1 ceph]$ sudo scp root@linux-node1:/home/ceph/my-cluster/ceph.conf /etc/ceph/ceph.conf
+[ceph@linux-node1 ceph]$ sudo scp root@linux-node1:/etc/ceph/ceph.client.admin.keyring /etc/ceph/ceph.client.admin.keyring
+[ceph@linux-node1 ceph]$ sudo mkdir /home/ceph/cephfs
+[ceph@linux-node1 ceph]$ sudo ceph-fuse -m 192.168.100.151:6789 /home/ceph/cephfs
+
+#用内核驱动挂载 CEPH 文件系统
+1) 要挂载 Ceph 文件系统，如果你知道监视器IP地址可以用 mount 命令、或者用 mount.ceph工具来自动解析监视器IP地址
+# sudo mkdir /mnt/mycephfs
+# sudo mount -t ceph 192.168.100.151:6789:/ /mnt/mycephfs
+2)要挂载启用了 cephx 认证的 Ceph 文件系统，你必须指定用户名、密钥
+# sudo mount -t ceph 192.168.100.151:6789:/ /mnt/mycephfs -o name=admin,secret=AQATSKdNGBnwLhAAnNDKnH65FmVKpXZJVasUeQ==
+3)前述用法会把密码遗留在 Bash 历史里，更安全的方法是从文件读密码。例如
+# sudo mount -t ceph 192.168.100.151:6789:/ /mnt/mycephfs -o name=admin,secretfile=/etc/ceph/admin.secret
+4)要卸载 Ceph 文件系统，可以用 unmount 命令
+# sudo umount /mnt/mycephfs
+
+CEPHFS配额管理
+#创建该文件目录的磁盘配额为100MB
+[ceph@linux-node1 ~]$ sudo setfattr -n ceph.quota.max_bytes -v 100000000 /home/ceph/cephfs/k8s
+#查看磁盘配额
+[ceph@linux-node1 ~]$ sudo getfattr -n ceph.quota.max_bytes /home/ceph/cephfs/k8s
+getfattr: Removing leading '/' from absolute path names
+# file: home/ceph/cephfs/k8s
+ceph.quota.max_bytes="100000000"
+#测试配额效果
+[ceph@linux-node1 k8s]$ dd if=/dev/zero of=1.txt bs=1M count=200
+dd: failed to open ‘1.txt’: Permission denied
+[ceph@linux-node1 k8s]$ sudo dd if=/dev/zero of=1.txt bs=1M count=200
+dd: error writing ‘1.txt’: Disk quota exceeded
+105+0 records in
+104+0 records out
+109314048 bytes (109 MB) copied, 3.52606 s, 31.0 MB/
+
+#再一次测试，发现无法写入了。
+[ceph@linux-node1 k8s]$ sudo dd if=/dev/zero of=2.txt bs=1M count=200
+dd: error writing ‘2.txt’: Disk quota exceeded
+1+0 records in
+0+0 records out
+0 bytes (0 B) copied, 0.00256971 s, 0.0 kB/
+
+#删除配额
+[ceph@linux-node1 k8s]$ sudo setfattr -n ceph.quota.max_bytes -v 0 /home/ceph/cephfs/k8s
+[ceph@linux-node1 k8s]$ sudo getfattr -n ceph.quota.max_bytes /home/ceph/cephfs/k8s
+/home/ceph/cephfs/k8s: ceph.quota.max_bytes: No such attribute
+
+
+#删除已经创建的块设备
+[root@linux-node1 ~]# rbd ls list -p volumes
+rbd_test
+volume-5e0b9cf5-6ebe-4641-8436-c3451af51eb9
+[root@linux-node1 ~]# rbd unmap volumes/rbd_test
+[root@linux-node1 ~]# rbd showmapped
+[root@linux-node1 ~]# rbd remove volumes/rbd_test
+Removing image: 100% complete...done.
+[root@linux-node1 ~]# rbd ls list -p volumes
+volume-5e0b9cf5-6ebe-4641-8436-c3451af51eb9
+                              
+                              r版ceph的安装和配置
+1)ceph的初始化和L版是一样，在这里就忽略了
+[ceph@controller1 ~]$ sudo yum install yum-plugin-priorities
+[ceph@controller1 ~]$ sudo yum install ceph-deploy
+[ceph@controller1 my-cluster]$ ceph-deploy new controller1 compute1 cinder
+[ceph@controller1 my-cluster]$ ceph-deploy install controller1 compute1 cinder
+[ceph@controller1 my-cluster]$ ceph-deploy mon create-initial
+[ceph@controller1 my-cluster]$ ceph-deploy disk zap controller1:sdb
+[ceph@controller1 my-cluster]$ ceph-deploy disk zap compute1:sdb
+[ceph@controller1 my-cluster]$ ceph-deploy disk zap cinder:sdb
+[ceph@controller1 my-cluster]$ mkfs.ext4 /dev/sdb
+[ceph@compute ~]$ mkfs.ext4 /dev/sdb
+[ceph@cinder ~]$ mkfs.ext4 /dev/sdb
+[ceph@controller1 my-cluster]$ sudo chmod +r ceph.client.admin.keyring
+[ceph@controller1 my-cluster]$ sudo cp -a /home/ceph/my-cluster/ceph.client.admin.keyring /etc/ceph/ceph.client.admin.keyring
+[ceph@controller1 my-cluster]$ vi ~/my-cluster/ceph.conf
+[global]
+fsid = 55b2d4e8-cb32-4edb-9cce-d32a64294503
+mon_initial_members = linux-node1, linux-node2, linux-node3
+mon_host = 192.168.100.151,192.168.100.152,192.168.100.153
+auth_cluster_required = cephx
+auth_service_required = cephx
+auth_client_required = cephx
+osd pool default size = 2
+mon clock drift allowed = 2
+mon clock drift warn backoff = 30
+mon_pg_warn_max_per_osd = 1000
+[mon]
+mon allow pool delete = true
+
+
+故障1
+IOError: [Errno 13] Permission denied: '/home/ceph/my-cluster/ceph-deploy-ceph.log'
+解决办法:
+# sudo chown -R ceph.ceph /home/ceph/my-cluster/
+
+故障2:
+[ceph@linux-node1 my-cluster]$ ceph-deploy disk zap linux-node1 /dev/sdb
+[linux-node1][ERROR ] RuntimeError: command returned non-zero exit status: 1
+[ceph_deploy][ERROR ] RuntimeError: Failed to execute command: /usr/sbin/ceph-volume lvm zap /dev/sdb
+解决办法：
+[ceph@linux-node1 my-cluster]$ mount
+/dev/sdb on /data type ext4 (rw,relatime,data=ordered)
+[ceph@linux-node1 my-cluster]$ sudo umount /data
+
+
+故障3
+ceph:health_warn clock skew detected on mon的解决办法
+造成集群状态health_warn：clock skew detected on mon节点的原因有两个，一个是mon节点上ntp服务器未启动，另一个是ceph设置的mon的时间偏差阈值比较小。
+
+排查时也应遵循先第一个原因，后第二个原因的方式。
+
+第一步：确认ntp服务是否正常工作
+参考本人博客： centos7 查看启动ntp服务命令
+
+第二步：修改ceph配置中的时间偏差阈值
+1. 在admin部署节点修改配置参数：
+# vi ~/my-cluster/ceph.conf
+在global字段下添加：
+mon clock drift allowed = 2
+mon clock drift warn backoff = 30    
+2. 向需要同步的mon节点推送配置文件：
+# ceph-deploy --overwrite-conf config push node{1..3}
+这里是向node1 node2 node3推送，也可以后跟其它不连续节点
+3. 重启mon服务（centos7环境下）
+# systemctl restart ceph-mon.target
+4.验证：
+# ceph -s
+显示health_ok说明问题解决
+
+故障4
+执行：ceph-deploy --overwrite-conf osd create node231:vdb
+问题：[ceph_deploy][ERROR ] NeedDiskError: Must supply disk/path argument: node12:sdb
+解决：在ceph luminous中创建bluestore的过程为指定data，block-db，block-wal
+例如执行ceph-deploy osd create node1 --data /dev/sde --block-db /dev/sdf1 --block-wal /dev/sdf2
+省略db 与wal的说明，只指定data则为ceph-deploy  osd create node1 --data /dev/sdb则创建于同一个盘
+
+故障5
+执行 ：ceph -s
+问题： health: HEALTH_WARN
+            no active mgr
+解决：Ceph Manager Daemon，简称ceph-mgr，该组件的主要作用是分担和扩展monitor的部分功能，减轻monitor的负担，让更好地管理ceph存储系统ceph
+ceph在 luminous中新加入了mgr功能模块，手动安装mgr即可
+ceph-deploy mgr create node01 node02 node03
+
+故障6
+
+[root@linux-node1 ~]# ceph -s
+  cluster:
+    id:     5496b323-10ad-419e-b336-3392ec196eb0
+    health: HEALTH_WARN
+            application not enabled on 1 pool(s)
+            too many PGs per OSD (256 > max 200)
+            clock skew detected on mon.linux-node3
+解决办法
+[root@linux-node3 ~]# ceph health detail
+HEALTH_WARN application not enabled on 1 pool(s); too many PGs per OSD (256 > max 200)
+POOL_APP_NOT_ENABLED application not enabled on 1 pool(s)
+    application not enabled on pool 'images'
+    use 'ceph osd pool application enable <pool-name> <app-name>', where <app-name> is 'cephfs', 'rbd', 'rgw', or freeform for custom applications.
+TOO_MANY_PGS too many PGs per OSD (256 > max 200)
+[root@linux-node1 ~]# ceph osd pool application enable images rbd
+
+故障7：
+[ceph@linux-node1 my-cluster]$ ceph osd pool create images 128
+pg_num 128 size 2 would mean 768 total pgs, which exceeds max 600 ...
+
+在全局会话中加入以下两行(或者直接加入第一行配置)
+[ceph@linux-node1 my-cluster]$ sudo vi /etc/ceph/ceph.conf 
+[global]
+... ....
+mon_max_pg_per_osd = 300 
+osd_max_pg_per_osd_hard_ratio = 1.2
+[ceph@linux-node1 my-cluster]$ sudo systemctl restart ceph-mon.target
+
+故障8：
+[root@linux-node1 ~]# ceph -s
+  cluster:
+    id:     5496b323-10ad-419e-b336-3392ec196eb0
+    health: HEALTH_WARN
+            too many PGs per OSD (256 > max 200)
+解决办法
+在每个mon服务器上都要修改配置文件的内容如下
+[ceph@controller1 my-cluster]$ ceph --show-config  | grep mon_pg_warn_max_per_osd
+mon_pg_warn_max_per_osd = 300
+[ceph@controller1 my-cluster]$ cd /etc/ceph/
+[ceph@controller1 ceph]$ sudo vi ceph.conf
+[global]
+fsid = 67027298-432d-409e-87e5-dbbd1f4a56eb
+mon_initial_members = controller1, compute1, cinder
+mon_host = 10.1.1.120,10.1.1.121,10.1.1.122
+auth_cluster_required = cephx
+auth_service_required = cephx
+auth_client_required = cephx
+osd pool default size = 2
+mon_pg_warn_max_per_osd = 1000
+在每个mon服务器上都要重启mon服务
+[ceph@controller1 ceph]$ sudo systemctl restart ceph-mon.target
+[ceph@controller1 ceph]$ sudo ceph -s
+    cluster 67027298-432d-409e-87e5-dbbd1f4a56eb
+     health HEALTH_OK
+     monmap e1: 3 mons at {cinder=10.1.1.122:6789/0,compute1=10.1.1.121:6789/0,controller1=10.1.1.120:6789/0}
+            election epoch 32, quorum 0,1,2 controller1,compute1,cinder
+     osdmap e25: 3 osds: 3 up, 3 in
+            flags sortbitwise,require_jewel_osds
+      pgmap v73: 512 pgs, 4 pools, 0 bytes data, 0 objects
+            329 MB used, 45717 MB / 46046 MB avail
+                 512 active+clean
+
+故障9
+[ceph@controller1 my-cluster]$ sudo yum install ceph-deploy
+Loaded plugins: fastestmirror, langpacks, priorities
+Loading mirror speeds from cached hostfile
+12 packages excluded due to repository priority protections
+Resolving Dependencies
+--> Running transaction check
+---> Package ceph-deploy.noarch 0:1.5.39-0 will be installed
+--> Processing Dependency: python-distribute for package: ceph-deploy-1.5.39-0.noarch
+--> Running transaction check
+---> Package python-setuptools.noarch 0:0.9.8-7.el7 will be installed
+Removing python-setuptools.noarch 0:0.9.8-7.el7 - u due to obsoletes from installed python2-setuptools-22.0.5-1.el7.noarch
+--> Restarting Dependency Resolution with new changes.
+--> Running transaction check
+---> Package python-setuptools.noarch 0:0.9.8-7.el7 will be installed
+--> Processing Dependency: python-distribute for package: ceph-deploy-1.5.39-0.noarch
+--> Finished Dependency Resolution
+Error: Package: ceph-deploy-1.5.39-0.noarch (ceph-noarch)
+           Requires: python-distribute
+ You could try using --skip-broken to work around the problem
+ You could try running: rpm -Va --nofiles --nodigest
+ 解决办法:
+ [ceph@controller1 my-cluster]$ sudo yum -y install python-pip
+ [ceph@controller1 my-cluster]$ sudo pip install ceph-deploy
+ [ceph@controller1 my-cluster]$ sudo pip install --upgrade pip
+
+故障10
+ [ceph@controller1 my-cluster]$ ceph-deploy disk zap controller1 /dev/sdb
+ [ceph_deploy][ERROR ] ExecutableNotFound: Could not locate executable 'ceph-volume' make sure it is installed and available on controller1
+ 解决办法：
+ 这个是因为ceph-deploy版本过高的原因
+ [ceph@controller1 my-cluster]$ sudo pip uninstall ceph-deploy
+Uninstalling ceph-deploy-2.0.1:
+  Would remove:
+    /usr/bin/ceph-deploy
+    /usr/lib/python2.7/site-packages/ceph_deploy-2.0.1-py2.7.egg-info
+    /usr/lib/python2.7/site-packages/ceph_deploy/*
+Proceed (y/n)? y
+  Successfully uninstalled ceph-deploy-2.0.1
+  [ceph@controller1 my-cluster]$ sudo pip install ceph-deploy==1.5.39
+Collecting ceph-deploy==1.5.39
+  Downloading https://files.pythonhosted.org/packages/63/59/c2752952b7867faa2d63ba47c47da96e2f43f5124029975b579020df3665/ceph-deploy-1.5.39.tar.gz (114kB)
+    100% |████████████████████████████████| 122kB 53kB/s 
+Requirement already satisfied: setuptools in /usr/lib/python2.7/site-packages (from ceph-deploy==1.5.39) (22.0.5)
+Installing collected packages: ceph-deploy
+  Running setup.py install for ceph-deploy ... done
+Successfully installed ceph-deploy-1.5.39
+
+
+
