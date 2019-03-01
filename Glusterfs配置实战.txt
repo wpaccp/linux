@@ -1,0 +1,792 @@
+                                         Glusterfs配置实战
+1.1 GlusterFS系统原理
+1.1.1 GlusterFS概述入门
+GlusterFS是什么
+分布式文件系统(POSIX兼容)
+无中心架构(无元数据服务器)
+集群式NAS存储系统
+采用异构的标准商业硬件
+资源池(聚合存储和内存)
+全局统一命名空间
+复制和自动修复
+易于部署和使用
+1.2 弹性哈希算法
+1.2.1 无集中式元数据服务
+消除性能瓶颈
+提高可靠性
+1.2.2 采用HASH算法定位文件
+基于路径和文件名
+一致性哈希DHT
+1.2.3 弹性卷管理
+文件存储在逻辑卷中
+逻辑卷从物理存储池中划分
+逻辑卷可以在线进行扩容和缩减
+1.3 基本原理
+1.3.1 GlusterFS基本概念
+1.3.2 弹性哈希算法
+1.3.2 GlusterFS卷类型
+1.3.2.1 哈希卷
+1)文件通过hash算法在所有brick上分布
+2)文件级RAID 0,不具有容错能力
+1.3.2.2 复制卷
+1)文件同步到多个brick上
+2)文件级RAID 1,具有容错能力
+3)写性能下降，读性能提升
+1.3.2.3 复合卷
+1)哈希卷和复和卷的复合方式
+2)同时具有哈希卷和复制卷的特点
+1.3.2.4 条带卷
+1)单个文件分布到多个brick上,支持超大文件
+2)类似RAID 0,以Round-Robin方式
+3)通常用于HPC中的超大文件高并发访问
+1.3.2.5 复合卷：哈希+条带
+1)哈希卷和条带卷的复合方式
+2)同时具有哈希卷和条带卷的特点
+1.4 安装和配置
+1.4.1 主机名ip地址规划表
+----------------------------------------------------------
+|节点       |管理IP        |私有IP       |磁盘           |
+----------------------------------------------------------
+|server1 |10.0.0.7      |10.0.1.7     |三块磁盘8GB    |
+----------------------------------------------------------
+|server2 |10.0.0.8      |10.0.1.8     |三块磁盘8GB    |
+----------------------------------------------------------
+|server3 |10.0.0.9      |10.0.1.9     |三块磁盘8GB    |
+----------------------------------------------------------
+|客户端     |10.0.0.10     |10.0.1.10    |客户端         |
+----------------------------------------------------------
+1.4.2 下载相关的软件包并安装
+软件下载地址:https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/  
+#yum install wget
+#mkdir 3.4.2
+#cd 3.4.2
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-api-3.4.2-1.el6.x86_64.rpm
+#get https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-api-devel-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-cli-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-debuginfo-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-devel-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-fuse-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-geo-replication-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-libs-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-rdma-3.4.2-1.el6.x86_64.rpm
+#wget https://bits.gluster.org/pub/gluster/glusterfs/3.4.2/x86_64/glusterfs-server-3.4.2-1.el6.x86_64.rpm
+1.4.3 下载并安装依赖包
+# yum install -y rpcbind libaio lvm2-devel
+1.4.4 服务器端安装软件包
+# rpm -ivh glusterfs-3.4.2-1.el6.x86_64.rpm glusterfs-cli-3.4.2-1.el6.x86_64.rpm
+glusterfs-libs-3.4.2-1.el6.x86_64.rpm glusterfs-api-3.4.2-1.el6.x86_64.rpm glusterfs-fuse-3.4.2-1.el6.x86_64.rpm glusterfs-server-3.4.2-1.el6.x86_64.rpm
+1.4.5 安装客户端软件包
+# rpm -ivh glusterfs-3.4.2-1.el6.x86_64.rpm glusterfs-libs-3.4.2-1.el6.x86_64.rpm
+glusterfs-fuse-3.4.2-1.el6.x86_64.rpm
+1.4.6 安装工具包
+1.4.6.1 工具软件
+1)Atop,iperf,sysstat
+2)dd,lozone,fio,postmark
+#yum install sysstat
+#yum install epel-release
+#yum install fio atop iperf dd
+#wget http://www.rpmfind.net/linux/dag/redhat/el5/en/x86_64/dag/RPMS/iozone-3.394-1.el5.rf.x86_64.rpm
+#Gcc -o postmark postmark-1.52.c
+1.4.7 系统配置
+主机名设置(三台服务器同时配置)
+echo "10.0.0.7 server1" >> /etc/hosts
+echo "10.0.0.8 server2" >> /etc/hosts
+echo "10.0.0.9 server3" >> /etc/hosts
+配置ntp服务
+#yum install ntp
+#service ntpd start
+在第二和第三台服务器上配置
+vim /etc/ntp.conf添加如下内容
+server server1
+# ntpdate server1
+关闭防火墙和selinux
+service iptables stop
+chkconfig iptables off
+sed -i 's#SELINUX=.*#SELINUX=disable#' /etc/sysconfig/config
+# setenforce 0
+在三个服务器上进行磁盘分区和格式化操作
+# mkfs.ext4 /dev/sdb
+# mkdir /brick1
+# mount /dev/sdb /brick1
+分区自动挂载
+#echo "/dev/sdb     /brick1 ext4   defaults   0 0" >>/etc/fstab
+#service glusterd start
+#chkconfig glusterd on
+1.4.8 组件扩展
+在server1上输入如下命令
+# gluster peer probe server2
+# gluster peer probe server3
+在server2,server3上查看组件扩展功能效果
+#gluster peer status
+1.4.9 创建卷(在server1上操作)
+# gluster volume create testvol server1:/brick1/b1
+# gluster volume start testvol
+# gluster volume info
+1.4.10 在客户端上挂载已经创建的卷
+mount -t glusterfs 10.0.0.7:/testvol /mnt/
+1.4.11 集群扩展
+1)增加节点
+Gluster peer probe IP/主机名
+2)删除节点
+Gluster peer detach IP/主机名
+3)节点状态
+Gluster peer status
+1.4.12 
+# gluster volume add-brick testvol server2:/brick1/b2 server3:/brick1/b3
+# gluster volume info
+删除节点操作
+#gluster volume remove-brick testvol server3:/brick1/b3
+节点的负载均衡
+# gluster volume rebalance testvol start
+# gluster volume rebalance testvol status
+删除卷
+# Gluster volume stop testvol
+# Gluster volume delete testvol
+创建复制卷
+# gluster volume create replica 2 server1:/brick1/b1 server2:/brick1/b2
+# gluster volume start testvol
+卷信息同步
+# cd /var/lib/glusterd/vols/
+# rm -rf testvol
+# gluster volume sync server2 all
+
+权限控制
+# gluster volume set testvol auth.allow 192.168.1.*
+# gluster volume set testvol auth.reject 10.0.*
+# gluster volume info
+# gluster volume set testvol nfs.disable on
+
+#glusterfs性能测试工具的使用
+在其中的一个节点起服务
+#iperf -s
+在另一个节点作为客户端上进行测试
+#iperfs -c server1 -P 4
+
+
+
+
+
+
+2.1 使用centos的yum源安装gluster
+----------------------------
+|节点       |管理IP        |
+----------------------------
+|server1 |192.168.56.11    |
+----------------------------
+|server2 |192.168.56.12    |
+----------------------------
+2.1.1 修改主机名和域名
+在server1主机上的配置
+[root@linux-node2 ~]# echo "server1" >/etc/hostname
+[root@linux-node2 ~]# hostname server1
+[root@linux-node2 ~]# cat >> /etc/hosts << eof
+192.168.100.160 server1
+192.168.100.253 server2
+eof
+在server2主机上的配置
+[root@cloudstack ~]# echo "server2" >/etc/hostname
+[root@cloudstack ~]# hostname server2
+[root@cloudstack ~]# cat >> /etc/hosts << eof
+192.168.100.160 server1
+192.168.100.253 server2
+eof
+#时间同步
+[root@linux-node2 etc]# systemctl restart ntpdate
+[root@linux-node2 etc]# date
+[root@linux-node3 ~]# systemctl start ntpd
+[root@linux-node3 ~]# date
+#gluster的安装(两台设备上都要安装)
+#yum install -y epel-release
+[root@server1 ~]# rpm -aq |grep epel
+epel-release-7-9.noarch
+[root@server1 ~]# yum info glusterfs
+Loaded plugins: fastestmirror, langpacks
+Repodata is over 2 weeks old. Install yum-cron? Or run: yum makecache fast
+Determining fastest mirrors
+ * base: mirrors.tuna.tsinghua.edu.cn
+ * epel: mirrors.tuna.tsinghua.edu.cn
+ * extras: mirrors.tuna.tsinghua.edu.cn
+ * updates: mirrors.aliyun.com
+Installed Packages
+Name        : glusterfs
+Arch        : x86_64
+Version     : 3.7.1
+Release     : 16.el7
+Size        : 1.6 M
+Repo        : installed
+From repo   : anaconda
+Summary     : Distributed File System
+URL         : http://www.gluster.org/docs/index.php/GlusterFS
+License     : GPLv2 or LGPLv3+
+Description : GlusterFS is a distributed file-system capable of scaling to several
+            : petabytes. It aggregates various storage bricks over Infiniband RDMA
+            : or TCP/IP interconnect into one large parallel network file
+            : system. GlusterFS is one of the most sophisticated file systems in
+            : terms of features and extensibility.  It borrows a powerful concept
+            : called Translators from GNU Hurd kernel. Much of the code in GlusterFS
+            : is in user space and easily manageable.
+            : 
+            : This package includes the glusterfs binary, the glusterfsd daemon and the
+            : libglusterfs and glusterfs translator modules common to both GlusterFS server
+            : and client framework.
+
+Available Packages
+Name        : glusterfs
+Arch        : x86_64
+Version     : 3.8.4
+Release     : 18.4.el7.centos
+Size        : 496 k
+Repo        : base/7/x86_64
+Summary     : Distributed File System
+URL         : http://www.gluster.org/docs/index.php/GlusterFS
+License     : GPLv2 or LGPLv3+
+Description : GlusterFS is a distributed file-system capable of scaling to several
+            : petabytes. It aggregates various storage bricks over Infiniband RDMA
+            : or TCP/IP interconnect into one large parallel network file
+            : system. GlusterFS is one of the most sophisticated file systems in
+            : terms of features and extensibility.  It borrows a powerful concept
+            : called Translators from GNU Hurd kernel. Much of the code in GlusterFS
+            : is in user space and easily manageable.
+            : 
+            : This package includes the glusterfs binary, the glusterfsd daemon and the
+            : libglusterfs and glusterfs translator modules common to both GlusterFS server
+            : and client framework.
+如果centos的默认的安装源，安装不了，请用以下glusterfs自带的安装源
+[root@linux-node2 ~]# yum install centos-release-gluster -y
+[root@linux-node3 ~]# yum install centos-release-gluster -y
+[root@linux-node2 ~]# yum install -y glusterfs glusterfs-server glusterfs-fuse glusterfs-rdma
+[root@linux-node3 ~]# yum install -y glusterfs glusterfs-server glusterfs-fuse glusterfs-rdma
+[root@linux-node2 ~]# rpm -aq | grep gluster
+glusterfs-cli-3.12.9-1.el7.x86_64
+glusterfs-libs-3.12.9-1.el7.x86_64
+glusterfs-rdma-3.12.9-1.el7.x86_64
+glusterfs-api-3.12.9-1.el7.x86_64
+glusterfs-server-3.12.9-1.el7.x86_64
+centos-release-gluster312-1.0-1.el7.centos.noarch
+glusterfs-client-xlators-3.12.9-1.el7.x86_64
+glusterfs-3.12.9-1.el7.x86_64
+glusterfs-fuse-3.12.9-1.el7.x86_64
+[root@linux-node3 ~]# rpm -aq | grep gluster
+glusterfs-client-xlators-3.12.9-1.el7.x86_64
+glusterfs-server-3.12.9-1.el7.x86_64
+glusterfs-3.12.9-1.el7.x86_64
+glusterfs-api-3.12.9-1.el7.x86_64
+centos-release-gluster312-1.0-1.el7.centos.noarch
+glusterfs-libs-3.12.9-1.el7.x86_64
+glusterfs-cli-3.12.9-1.el7.x86_64
+glusterfs-fuse-3.12.9-1.el7.x86_64
+glusterfs-rdma-3.12.9-1.el7.x86_64
+[root@linux-node2 ~]# systemctl start glusterd
+[root@linux-node3 ~]# systemctl start glusterd
+[root@linux-node2 ~]# systemctl status glusterd
+â— glusterd.service - GlusterFS, a clustered file-system server
+   Loaded: loaded (/usr/lib/systemd/system/glusterd.service; disabled; vendor preset: disabled)
+   Active: active (running) since Wed 2018-05-02 14:29:51 CST; 49s ago
+  Process: 54455 ExecStart=/usr/sbin/glusterd -p /var/run/glusterd.pid --log-level $LOG_LEVEL $GLUSTERD_OPTIONS (code=exited, status=0/SUCCESS)
+ Main PID: 54456 (glusterd)
+   CGroup: /system.slice/glusterd.service
+           â””â”€54456 /usr/sbin/glusterd -p /var/run/glusterd.pid --log-level INFO
+
+May 02 14:29:51 server1 systemd[1]: Starting GlusterFS, a clustered file-system server...
+May 02 14:29:51 server1 systemd[1]: Started GlusterFS, a clustered file-system server.
+
+[root@linux-node3 ~]# systemctl status glusterd
+● glusterd.service - GlusterFS, a clustered file-system server
+   Loaded: loaded (/usr/lib/systemd/system/glusterd.service; disabled; vendor preset: disabled)
+   Active: active (running) since Wed 2018-05-02 14:30:20 CST; 41s ago
+  Process: 41565 ExecStart=/usr/sbin/glusterd -p /var/run/glusterd.pid --log-level $LOG_LEVEL $GLUSTERD_OPTIONS (code=exited, status=0/SUCCESS)
+ Main PID: 41566 (glusterd)
+   CGroup: /system.slice/glusterd.service
+           └─41566 /usr/sbin/glusterd -p /var/run/glusterd.pid --log-level INFO
+
+May 02 14:30:20 server2 systemd[1]: Starting GlusterFS, a clustered file-system server...
+May 02 14:30:20 server2 systemd[1]: Started GlusterFS, a clustered file-system server.
+
+[root@linux-node2 ~]# gluster peer probe server2
+peer probe: success. 
+# gluster peer status
+[root@linux-node2 ~]# gluster peer status
+Number of Peers: 1
+
+Hostname: server2
+Uuid: 587bdb89-522a-4299-9509-dde3e7ee83b1
+State: Accepted peer request (Connected)
+
+[root@linux-node3 ~]# gluster peer status
+Number of Peers: 1
+
+Hostname: server1
+Uuid: f34ebfde-cba3-49fa-b89a-b9f3fe853586
+State: Accepted peer request (Disconnected)
+#故障解决
+1)关闭防火墙，或是开启端口
+[root@linux-node2 ~]# systemctl stop firewalld.service
+[root@linux-node2 ~]# iptables -L
+[root@linux-node2 ~]# setenforce 0
+[root@server2 ~]# gluster peer status
+Number of Peers: 1
+Hostname: server1
+Uuid: f34ebfde-cba3-49fa-b89a-b9f3fe853586
+State: Peer Rejected (Connected)
+[root@server1 ~]# systemctl restart glusterd
+[root@server2 ~]# systemctl restart glusterd
+2.2 创建卷
+2.2.1 分布式卷的创建
+#mkdir /data/exp1 -p  #(192.168.56.11)
+#mkdir /data/exp2 -p  #(192.168.56.12)
+在192.168.56.11上执行如下命令
+[root@server1 ~]# gluster volume create test-volume server1:/data/exp1 server2:/data/exp2 force
+volume create: test-volume: success: please start the volume to access data
+[root@server1 ~]# gluster volume info
+Volume Name: test-volume
+Type: Distribute
+Volume ID: 5f7c768b-407a-45f3-b834-3d58bd7f191e
+Status: Created
+Snapshot Count: 0
+Number of Bricks: 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp1
+Brick2: server2:/data/exp2
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+
+2.2 复制卷的创建
+#在两台设备上执行如下命令
+# mkdir /data/exp3 #(192.168.56.11)
+# mkdir /data/exp4 #(192.168.56.12)
+[root@server2 ~]# gluster volume create repl-volume replica 2 transport tcp server1:/data/exp3 server2:/data/exp4 force
+volume create: repl-volume: success: please start the volume to access data
+[root@server2 ~]# gluster volume info repl-volume
+ Volume Name: repl-volume
+Type: Replicate
+Volume ID: ddd05b41-a5eb-4e03-bbbd-b9658ba494c0
+Status: Created
+Snapshot Count: 0
+Number of Bricks: 1 x 2 = 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp3
+Brick2: server2:/data/exp4
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+performance.client-io-threads: off
+2.3 条带卷的创建
+[root@server1 ~]# gluster volume create wpaccp-volume stripe 2 transport tcp server1:/data/exp5 server2:/data/exp6 force
+volume create: wpaccp-volume: success: please start the volume to access data
+#在两台设备上执行如下命令
+# mkdir /data/exp5 #(192.168.56.11)
+# mkdir /data/exp6 #(192.168.56.12)
+# gluster volume info test-volume
+# gluster volume status
+# 启动卷服务
+[root@server1 ~]# gluster volume start repl-volume
+volume start: repl-volume: succes
+[root@server1 ~]# gluster volume start test-volume
+volume start: test-volume: success
+[root@server1 ~]# gluster volume start wpaccp-volume
+volume start: wpaccp-volume: success
+[root@server1 ~]# gluster volume info
+ 
+Volume Name: repl-volume
+Type: Replicate
+Volume ID: ddd05b41-a5eb-4e03-bbbd-b9658ba494c0
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 1 x 2 = 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp3
+Brick2: server2:/data/exp4
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+performance.client-io-threads: off
+ 
+Volume Name: test-volume
+Type: Distribute
+Volume ID: 5f7c768b-407a-45f3-b834-3d58bd7f191e
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp1
+Brick2: server2:/data/exp2
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+ 
+Volume Name: wpaccp-volume
+Type: Stripe
+Volume ID: eef1e832-5fc2-4c93-8b1b-ac81e0a0b843
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 1 x 2 = 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp5
+Brick2: server2:/data/exp6
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+
+[root@server2 ~]# gluster volume info
+ 
+Volume Name: repl-volume
+Type: Replicate
+Volume ID: ddd05b41-a5eb-4e03-bbbd-b9658ba494c0
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 1 x 2 = 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp3
+Brick2: server2:/data/exp4
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+performance.client-io-threads: off
+ 
+Volume Name: test-volume
+Type: Distribute
+Volume ID: 5f7c768b-407a-45f3-b834-3d58bd7f191e
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp1
+Brick2: server2:/data/exp2
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+ 
+Volume Name: wpaccp-volume
+Type: Stripe
+Volume ID: eef1e832-5fc2-4c93-8b1b-ac81e0a0b843
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 1 x 2 = 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp5
+Brick2: server2:/data/exp6
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+
+# 客户端挂载卷
+[root@server2 ~]# yum install glusterfs-client
+[root@server2 ~]# mkdir /mnt/g1 /mnt/g2 /mnt/g3
+[root@server2 ~]# mount.glusterfs server1:/test-volume /mnt/g1
+[root@server2 ~]# mount.glusterfs server1:/repl-volume /mnt/g2
+[root@server2 ~]# mount.glusterfs server1:/wpaccp-volume /mnt/g3
+[root@server2 ~]# df -h
+Filesystem              Size  Used Avail Use% Mounted on
+/dev/sda3                17G  2.4G   15G  14% /
+devtmpfs                480M     0  480M   0% /dev
+tmpfs                   489M     0  489M   0% /dev/shm
+tmpfs                   489M  6.7M  483M   2% /run
+tmpfs                   489M     0  489M   0% /sys/fs/cgroup
+/dev/sda1              1014M  130M  885M  13% /boot
+tmpfs                    98M     0   98M   0% /run/user/0
+server1:/test-volume     55G  5.6G   49G  11% /mnt/g1
+server1:/repl-volume     17G  2.4G   15G  14% /mnt/g2
+server1:/wpaccp-volume   55G  5.6G   49G  11% /mnt/g3
+# 客户端测试
+# echo 1 >/mnt/g1/test1.txt
+[root@server1 ~]# cd /data/exp1
+[root@server1 exp1]# ls -l
+total 8
+-rw-r--r--. 2 root root 2 May  2 15:52 test1.txt
+2.4 组合卷-分布式复制卷
+[root@server1 ~]# mkdir /exp1 /exp2
+[root@server2 ~]# mkdir /exp1 /exp2
+[root@server1 ~]# gluster volume create wp-volume replica 2 transport tcp server1:/exp1 server2:/exp1 server1:/exp2 server2:/exp2 force
+volume create: wp-volume: success: please start the volume to access data
+[root@server1 ~]# gluster volume start wp-volume
+volume start: wp-volume: success
+[root@server1 ~]# gluster volume info wp-volume
+ Volume Name: wp-volume
+Type: Distributed-Replicate
+Volume ID: b1aba7c1-796f-4ea3-951c-d0e24fe7dea9
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 2 x 2 = 4
+Transport-type: tcp
+Bricks:
+Brick1: server1:/exp1
+Brick2: server2:/exp1
+Brick3: server1:/exp2
+Brick4: server2:/exp2
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+performance.client-io-threads: off
+
+[root@server2 ~]# gluster volume info wp-volume
+ 
+Volume Name: wp-volume
+Type: Distributed-Replicate
+Volume ID: b1aba7c1-796f-4ea3-951c-d0e24fe7dea9
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 2 x 2 = 4
+Transport-type: tcp
+Bricks:
+Brick1: server1:/exp1
+Brick2: server2:/exp1
+Brick3: server1:/exp2
+Brick4: server2:/exp2
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+performance.client-io-threads: off
+[root@server1 ~]# mount.glusterfs server2:/wp-volume /mnt/g5
+[root@server1 ~]# df -h
+Filesystem               Size  Used Avail Use% Mounted on
+/dev/mapper/centos-root   38G  3.3G   35G   9% /
+devtmpfs                 474M     0  474M   0% /dev
+tmpfs                    489M     0  489M   0% /dev/shm
+tmpfs                    489M  7.0M  483M   2% /run
+tmpfs                    489M     0  489M   0% /sys/fs/cgroup
+/dev/sda1                497M  157M  340M  32% /boot
+tmpfs                     98M     0   98M   0% /run/user/0
+server2:/wp-volume        17G  2.4G   15G  14% /mnt/g5
+[root@server1 ~]# man tcp >/mnt/g5/tcp1.txt
+[root@server1 ~]# man tcp >/mnt/g5/tcp2.txt
+[root@server1 ~]# tree /exp1
+/exp1
+â””â”€â”€ tcp2.txt
+
+0 directories, 1 file
+[root@server1 ~]# tree /exp2
+/exp2
+â””â”€â”€ tcp1.txt
+
+0 directories, 1 file
+
+[root@server2 ~]# tree /exp1
+/exp1
+└── tcp2.txt
+
+0 directories, 1 file
+[root@server2 ~]# tree /exp2
+/exp2
+└── tcp1.txt
+
+2.5 组合卷-分布式条带卷
+2.6 设置磁盘配额
+2.7 添加一个卷
+[root@server1 ~]# mkdir /data/exp9
+[root@server1 ~]# gluster volume add-brick test-volume server1:/data/exp9 force
+volume add-brick: success
+[root@server2 ~]# cd /mnt/g1
+[root@server2 g1]# touch {1..100}.txt
+[root@server1 ~]# gluster volume rebalance test-volume start
+
+2.8 删除一个卷
+[root@server1 ~]# gluster volume remove-brick test-volume server1:/data/exp9 force
+[root@server1 exp9]# gluster volume info test-volume
+Volume Name: test-volume
+Type: Distribute
+Volume ID: 5f7c768b-407a-45f3-b834-3d58bd7f191e
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp1
+Brick2: server2:/data/exp2
+Options Reconfigured:
+performance.client-io-threads: on
+transport.address-family: inet
+nfs.disable: on
+[root@server1 ~]# cd /data/exp9
+[root@server1 exp9]# ls -l
+[root@server2 exp2]# gluster volume info test-volume
+ 
+Volume Name: test-volume
+Type: Distribute
+Volume ID: 5f7c768b-407a-45f3-b834-3d58bd7f191e
+Status: Started
+Snapshot Count: 0
+Number of Bricks: 2
+Transport-type: tcp
+Bricks:
+Brick1: server1:/data/exp1
+Brick2: server2:/data/exp2
+Options Reconfigured:
+performance.client-io-threads: on
+transport.address-family: inet
+nfs.disable: on
+[root@server2 ~]# gluster volume rebalance test-volume start
+volume rebalance: test-volume: success: Rebalance on test-volume has been started successfully. Use rebalance status command to check status of the rebalance process.
+ID: 596efce1-7f7d-4a8c-9274-ced36c39fd97
+[root@server2 g1]# gluster volume status
+Status of volume: repl-volume
+Gluster process                             TCP Port  RDMA Port  Online  Pid
+------------------------------------------------------------------------------
+Brick server1:/data/exp3                    49152     0          Y       55661
+Brick server2:/data/exp4                    49152     0          Y       9748 
+Self-heal Daemon on localhost               N/A       N/A        Y       10218
+Self-heal Daemon on server1                 N/A       N/A        Y       56054
+ 
+Task Status of Volume repl-volume
+------------------------------------------------------------------------------
+There are no active volume tasks
+ 
+Status of volume: test-volume
+Gluster process                             TCP Port  RDMA Port  Online  Pid
+------------------------------------------------------------------------------
+Brick server1:/data/exp1                    49153     0          Y       55722
+Brick server2:/data/exp2                    49153     0          Y       9795 
+ 
+Task Status of Volume test-volume
+------------------------------------------------------------------------------
+Task                 : Rebalance           
+ID                   : 596efce1-7f7d-4a8c-9274-ced36c39fd97
+Status               : completed           
+ 
+Status of volume: wp-volume
+Gluster process                             TCP Port  RDMA Port  Online  Pid
+------------------------------------------------------------------------------
+Brick server1:/exp1                         49155     0          Y       56013
+Brick server2:/exp1                         49155     0          Y       10177
+Brick server1:/exp2                         49156     0          Y       56033
+Brick server2:/exp2                         49156     0          Y       10197
+Self-heal Daemon on localhost               N/A       N/A        Y       10218
+Self-heal Daemon on server1                 N/A       N/A        Y       56054
+ 
+Task Status of Volume wp-volume
+------------------------------------------------------------------------------
+There are no active volume tasks
+ 
+Status of volume: wpaccp-volume
+Gluster process                             TCP Port  RDMA Port  Online  Pid
+------------------------------------------------------------------------------
+Brick server1:/data/exp5                    49154     0          Y       55763
+Brick server2:/data/exp6                    49154     0          Y       9830 
+ 
+Task Status of Volume wpaccp-volume
+------------------------------------------------------------------------------
+There are no active volume tasks
+
+2.9 删除整个卷
+[root@server2 ~]# gluster volume delete test-volume
+
+
+
+1.1 glusterfs的配置<两台设备要同时配置>
+[root@linux-node1 ~]# rpm -aq | grep epel-release
+[root@linux-node1 ~]# yum install -y epel-release
+[root@linux-node1 ~]# yum install centos-release-gluster -y
+[root@linux-node1 ~]# yum --enablerepo=centos-gluster*-test install glusterfs-server glusterfs-cli glusterfs-geo-replication
+[root@linux-node1 ~]# rpm -aq | grep glusterfs
+[root@linux-node1 ~]# systemctl start glusterd
+[root@linux-node1 ~]# systemctl status glusterd
+â— glusterd.service - GlusterFS, a clustered file-system server
+   Loaded: loaded (/usr/lib/systemd/system/glusterd.service; disabled; vendor preset: disabled)
+   Active: active (running) since Thu 2018-05-17 15:01:54 CST; 7s ago
+  Process: 3764 ExecStart=/usr/sbin/glusterd -p /var/run/glusterd.pid --log-level $LOG_LEVEL $GLUSTERD_OPTIONS (code=exited, status=0/SUCCESS)
+ Main PID: 3765 (glusterd)
+   CGroup: /system.slice/glusterd.service
+           â””â”€3765 /usr/sbin/glusterd -p /var/run/glusterd.pid --log-level INFO
+
+May 17 15:01:52 linux-node1 systemd[1]: Starting GlusterFS, a clustered file-system server...
+May 17 15:01:54 linux-node1 systemd[1]: Started GlusterFS, a clustered file-system server.
+[root@linux-node1 ~]# systemctl stop glusterd
+[root@linux-node1 ~]# systemctl status glusterd
+â— glusterd.service - GlusterFS, a clustered file-system server
+   Loaded: loaded (/usr/lib/systemd/system/glusterd.service; disabled; vendor preset: disabled)
+   Active: inactive (dead)
+
+agent1上的配置(192.168.118.139)   
+[root@linux-node1 ~]# hostname agent1
+[root@linux-node1 ~]# vi /etc/hostname
+agent1   
+[root@linux-node1 ~]# vi /etc/hosts
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+192.168.118.139 agent1
+192.168.118.129 agent2
+[root@linux-node1 ~]# logout
+
+agent2上的配置(192.168.118.129)
+[root@localhost ~]# hostname agent2
+[root@localhost ~]# vi /etc/hostname
+agent2
+[root@localhost ~]# vi /etc/hosts
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+192.168.118.139 agent1
+192.168.118.129 agent2
+[root@localhost ~]# logout
+
+agent1上配置glusterfs集群
+[root@agent1 ~]# systemctl start glusterd
+[root@agent1 ~]# gluster peer probe agent2
+agent1上配置glusterfs卷
+[root@agent1 ~]# mkdir -p /export/primary
+[root@agent1 ~]# gluster volume create gv1 replica 2 agent1:/export/primary agent2:/export/primary force
+volume create: gv1: success: please start the volume to access data
+[root@agent1 ~]# gluster volume info
+ 
+Volume Name: gv1
+Type: Replicate
+Volume ID: b5f3fc07-8c08-478b-821d-2d2725d6dbe7
+Status: Created
+Snapshot Count: 0
+Number of Bricks: 1 x 2 = 2
+Transport-type: tcp
+Bricks:
+Brick1: agent1:/export/primary
+Brick2: agent2:/export/primary
+Options Reconfigured:
+transport.address-family: inet
+nfs.disable: on
+performance.client-io-threads: off
+[root@agent1 ~]# gluster volume start gv1
+volume start: gv1: success
+
+agent2上的配置
+[root@agent2 ~]# systemctl start glusterd 
+[root@agent2 ~]# mkdir -p /export/primary
+[root@agent2 ~]# 
+[root@agent2 ~]# mount -t glusterfs 127.0.0.1:/gv1 /mnt
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
